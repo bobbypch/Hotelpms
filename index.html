@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<meta name="theme-color" content="#07080a"/>
+<title>PCH BWP Hotel PMS</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;font-family:system-ui,sans-serif}
+body{background:#07080a;color:#e8eaf0;min-height:100vh}
+button{cursor:pointer;font-family:inherit}
+input,select{font-family:inherit;color-scheme:dark;-webkit-appearance:none;background:#0f1117;border:1px solid #1e2330;color:#e8eaf0;padding:10px 12px;border-radius:8px;width:100%;font-size:13px;outline:none;box-sizing:border-box}
+select option{background:#0f1117}
+.card{background:#151820;border:1px solid #1e2330;border-radius:14px;padding:16px}
+.btn{border:none;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:700;cursor:pointer}
+.sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;display:flex;align-items:flex-end}
+.sheet{background:#151820;border:1px solid #1e2330;border-radius:18px 18px 0 0;padding:20px 18px 32px;width:100%;max-height:92vh;overflow-y:auto}
+.tab-bar{background:#0f1117;border-bottom:1px solid #1e2330;overflow-x:auto;display:flex;scrollbar-width:none}
+.tab-bar::-webkit-scrollbar{display:none}
+.tab-btn{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 11px;background:none;border:none;border-bottom:2px solid transparent;font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#4a5568;cursor:pointer}
+.tab-btn.active{color:#4f8ef7;border-bottom-color:#4f8ef7}
+.room-btn{width:42px;padding:6px 2px;border-radius:7px;border:1px solid;text-align:center;cursor:pointer;background:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fIn{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
+.toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);padding:10px 20px;border-radius:24px;font-size:12px;font-weight:700;box-shadow:0 4px 30px rgba(0,0,0,.6);white-space:nowrap;animation:fIn .2s ease;z-index:9999}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ═══════════════════════════════════════════
+// PCH BWP HOTEL PMS — Zero Dependencies
+// Pure Vanilla JS, no React, no CDN needed
+// ═══════════════════════════════════════════
+
+const FB_CONFIG = {
+  apiKey:"AIzaSyBdFDyqlXBVMrIYPCafEEgF9qSP1Htwgmg",
+  databaseURL:"https://hotel-pms-74ecc-default-rtdb.firebaseio.com"
+};
+
+// ── Firebase ─────────────────────────────────
+let db=null;
+async function initFirebase(){
+  return new Promise(res=>{
+    const s1=document.createElement('script');
+    s1.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js';
+    s1.onload=()=>{
+      const s2=document.createElement('script');
+      s2.src='https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js';
+      s2.onload=()=>{
+        try{firebase.initializeApp(FB_CONFIG);db=firebase.database();console.log('FB OK');}catch(e){}
+        res();
+      };
+      s2.onerror=()=>res();
+      document.head.appendChild(s2);
+    };
+    s1.onerror=()=>res();
+    document.head.appendChild(s1);
+    setTimeout(res,5000); // timeout after 5s
+  });
+}
+
+async function fbSave(data){
+  try{localStorage.setItem('pchbwp_v3',JSON.stringify(data));}catch(e){}
+  if(db){try{await db.ref('pms/data').set(data);}catch(e){}}
+}
+async function fbLoad(){
+  if(db){try{const s=await db.ref('pms/data').get();if(s.exists())return s.val();}catch(e){}}
+  try{const s=localStorage.getItem('pchbwp_v3');if(s)return JSON.parse(s);}catch(e){}
+  return null;
+}
+
+// ── Data ──────────────────────────────────────
+const T={bg:'#07080a',surface:'#0f1117',card:'#151820',border:'#1e2330',
+  accent:'#4f8ef7',gold:'#f0b429',green:'#2ec27e',red:'#e05c5c',
+  purple:'#9b72f2',muted:'#4a5568',text:'#e8eaf0',sub:'#8892a4'};
+const SC={available:T.green,occupied:T.accent,reserved:T.gold,cleaning:T.purple,maintenance:T.red};
+const RATES={Deluxe:{Single:5000,Twin:5500,Triple:6000},Executive:{Single:5000,Twin:5500,Triple:6000},Standard:{Single:4000,Twin:4500,Triple:5000}};
+const ALL_PERMS=['dashboard','rooms','bookings','guests','kitchen','employees','accounts','reports','settings','users','checkin','checkout','rates'];
+const fmt=n=>'PKR '+Number(n).toLocaleString();
+const today=()=>new Date().toISOString().slice(0,10);
+
+function makeRooms(){
+  const r=[];
+  [{floor:1,from:101,to:108,cat:'Deluxe'},{floor:2,from:201,to:210,cat:'Executive'},{floor:3,from:301,to:310,cat:'Standard'}]
+  .forEach(({floor,from,to,cat})=>{
+    for(let id=from;id<=to;id++){
+      const bed=id%3===0?'Triple':id%2===0?'Twin':'Single';
+      r.push({id,category:cat,floor,bedType:bed,baseRate:RATES[cat][bed],customRate:null,status:'available',guest:null,checkIn:null,checkOut:null,guestId:null,bkId:null});
+    }
+  });
+  return r;
+}
+
+function makeData(){
+  return {
+    rooms:makeRooms(),bookings:[],
+    guests:[
+      {id:'G-001',name:'Ahmed Khan',phone:'+92-300-1234567',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:4,totalSpent:88000,notes:'',tags:['Regular'],customRate:null,company:'',idPhoto:''},
+      {id:'G-002',name:'Fatima Malik',phone:'+92-321-9876543',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:2,totalSpent:22000,notes:'Vegetarian',tags:['Regular'],customRate:null,company:'',idPhoto:''},
+      {id:'G-003',name:'Tanvir Ahmed',phone:'+9203002588244',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6380,notes:'CPSP',tags:['Corporate'],customRate:6380,company:'CPSP',idPhoto:''},
+      {id:'G-004',name:'Omar Farooq',phone:'+92-312-2345678',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:true,stays:12,totalSpent:350000,notes:'VIP',tags:['VIP','Corporate'],customRate:5500,company:'Corp Ltd',idPhoto:''},
+      {id:'G-005',name:'Sumera Maqsood',phone:'+923176566589',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:4000,notes:'',tags:['Walk-in'],customRate:4000,company:'',idPhoto:''},
+      {id:'G-006',name:'Sana Rafi',phone:'+9203289040414',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:4500,notes:'',tags:['Walk-in'],customRate:4500,company:'',idPhoto:''},
+      {id:'G-007',name:'Saeed Ahmad',phone:'+923213767786',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:4500,notes:'',tags:['Walk-in'],customRate:4500,company:'',idPhoto:''},
+      {id:'G-008',name:'Sheikh Sohail',phone:'+9203006316665',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5500,notes:'',tags:['Walk-in'],customRate:5500,company:'',idPhoto:''},
+      {id:'G-009',name:'Aurangzaib Bloch',phone:'+923450299458',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-010',name:'Haseeb Ali',phone:'+9203046750399',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:4500,notes:'',tags:['Walk-in'],customRate:4500,company:'',idPhoto:''},
+      {id:'G-011',name:'M Imran',phone:'+9203012948773',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5500,notes:'',tags:['Walk-in'],customRate:5500,company:'',idPhoto:''},
+      {id:'G-012',name:'Amir Khan',phone:'+923344468889',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5204,notes:'',tags:['Walk-in'],customRate:null,company:'',idPhoto:''},
+      {id:'G-013',name:'Riaz Ahmed',phone:'+923003132324',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6000,notes:'',tags:['Walk-in'],customRate:6000,company:'',idPhoto:''},
+      {id:'G-014',name:'Qamer Zaman',phone:'+923161149570',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5500,notes:'',tags:['Walk-in'],customRate:5500,company:'',idPhoto:''},
+      {id:'G-015',name:'Sakhawat Ali',phone:'+923006878973',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-016',name:'M Ikrash Qureshi',phone:'+9203088228794',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-017',name:'Farhan Naqi',phone:'+9203076327426',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:4500,notes:'',tags:['Walk-in'],customRate:4500,company:'',idPhoto:''},
+      {id:'G-018',name:'Muhammad Madni',phone:'+923014121999',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6000,notes:'',tags:['Walk-in'],customRate:6000,company:'',idPhoto:''},
+      {id:'G-019',name:'Babar Moon',phone:'+923213735050',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-020',name:'Minhaj A Khan',phone:'+9203032101103',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:true,stays:2,totalSpent:16000,notes:'',tags:['Regular'],customRate:null,company:'',idPhoto:''},
+      {id:'G-021',name:'Kashif Jamal',phone:'+923205699571',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:9000,notes:'',tags:['Walk-in'],customRate:9000,company:'',idPhoto:''},
+      {id:'G-022',name:'Salman Ehsan',phone:'+923008109100',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-023',name:'M Shahid Javed',phone:'+923421114340',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6960,notes:'Macter International',tags:['Corporate'],customRate:6960,company:'Macter International',idPhoto:''},
+      {id:'G-024',name:'Waleed Ijaz',phone:'+923429060006',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5500,notes:'',tags:['Walk-in'],customRate:5500,company:'',idPhoto:''},
+      {id:'G-025',name:'Rasheed Ahmad',phone:'+923063695432',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6500,notes:'',tags:['Walk-in'],customRate:6500,company:'',idPhoto:''},
+      {id:'G-026',name:'Aleem Ahmed',phone:'+923363168976',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:6000,notes:'',tags:['Walk-in'],customRate:6000,company:'',idPhoto:''},
+      {id:'G-027',name:'Arslan Muzamil',phone:'+9203218230187',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:5000,notes:'',tags:['Walk-in'],customRate:5000,company:'',idPhoto:''},
+      {id:'G-028',name:'M Hinza Ajmal',phone:'+923128721119',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:15000,notes:'',tags:['Walk-in'],customRate:15000,company:'',idPhoto:''},
+      {id:'G-029',name:'M Tanveer Hussain Awan',phone:'+923238556202',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:1,totalSpent:13500,notes:'',tags:['Walk-in'],customRate:9000,company:'',idPhoto:''},
+      {id:'G-030',name:'Shouket Hussain',phone:'+923342916172',nationality:'Pakistani',idType:'CNIC',idNo:'',email:'',dob:'',vip:false,stays:2,totalSpent:0,notes:'',tags:['Regular'],customRate:null,company:'',idPhoto:''},
+    ],
+    employees:[
+      {id:'E-001',name:'Sarah Ahmed',role:'Front Desk Manager',dept:'Front Office',phone:'',email:'',shift:'Morning',status:'active',since:'2020-03-01',salary:45000},
+      {id:'E-002',name:'Raj Patel',role:'Housekeeping Supervisor',dept:'Housekeeping',phone:'',email:'',shift:'Morning',status:'active',since:'2019-07-15',salary:38000},
+    ],
+    kitchenOrders:[],
+    accounts:{transactions:[]},
+    users:[{id:'U-001',username:'bobby',password:'admin123',name:'Bobby (Admin)',role:'admin',isAdmin:true,permissions:ALL_PERMS,active:true}],
+    settings:{hotelName:'PCH BWP Hotel',address:'Bahawalpur, Pakistan',phone:'+92-62-000000',email:'info@pchbwp.com',waNotifications:true,waNumber:'923046310071',taxRate:16}
+  };
+}
+
+// ── State ─────────────────────────────────────
+let STATE={data:null,user:null,tab:'dashboard',sheet:null,form:{},detail:null,toast:null,koForm:{room:'',items:{}},quickCI:false,quickRoom:null,roomModal:null,printDoc:null,ciOpts:{taxable:true,breakfast:false},globalCiOpts:{taxable:true,breakfast:false},search:'',loading:true};
+
+function setState(patch){Object.assign(STATE,typeof patch==='function'?patch(STATE):patch);render();}
+
+function upd(fn){
+  const d=JSON.parse(JSON.stringify(STATE.data));
+  fn(d);
+  fbSave(d);
+  setState({data:d});
+}
+
+// ── Toast ─────────────────────────────────────
+function flash(msg,err=false){
+  setState({toast:{msg,err}});
+  setTimeout(()=>setState({toast:null}),3000);
+}
+
+// ── Bill calc ─────────────────────────────────
+function calcBill(b,kOrders,taxRate){
+  const rate=b.customRate||b.baseRate;
+  const roomCharge=rate*b.nights;
+  const extras=(b.extraCharges||[]).reduce((s,x)=>s+x.amount,0);
+  const kitchen=(kOrders||[]).filter(k=>k.bkId===b.id&&k.postedToBill).reduce((s,k)=>s+k.total,0);
+  const subtotal=roomCharge+extras+kitchen;
+  const tax=subtotal*(taxRate/100);
+  return{rate,roomCharge,extras,kitchen,subtotal,tax,grand:Math.round(subtotal+tax)};
+}
+
+// ── Print ─────────────────────────────────────
+const PCSS=`body{font-family:Arial,sans-serif;font-size:12px;color:#111;padding:20px}
+.h{text-align:center;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+.hn{font-size:18px;font-weight:900;letter-spacing:2px}.hs{font-size:10px;color:#555}
+h2{font-size:12px;text-align:center;margin:8px 0;text-transform:uppercase;letter-spacing:2px}
+.s{margin:8px 0;padding:8px 10px;border:1px solid #ddd;border-radius:3px}
+.st{font-weight:700;font-size:10px;text-transform:uppercase;color:#555;margin-bottom:6px;border-bottom:1px solid #eee;padding-bottom:3px}
+.r{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #eee;font-size:11px}
+.lb{color:#666}.vl{font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{background:#f5f5f5;padding:4px 5px;text-align:left;border-bottom:1px solid #ddd}
+td{padding:4px 5px;border-bottom:1px solid #f0f0f0}
+.tr{display:flex;justify-content:space-between;padding:3px 0;font-size:11px}
+.grand{display:flex;justify-content:space-between;padding:6px 0;font-weight:900;font-size:14px;border-top:2px solid #111;margin-top:5px}
+.sig{display:flex;justify-content:space-between;margin-top:24px}
+.sb{border-top:1px solid #111;padding-top:3px;width:40%;text-align:center;font-size:10px;color:#555}
+.ftr{text-align:center;margin-top:14px;font-size:10px;color:#999;padding-top:8px;border-top:1px solid #ddd}`;
+
+function showPrint(html){
+  const full=`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>${PCSS}</style></head><body>${html}</body></html>`;
+  setState({printDoc:full});
+}
+function hdr(hn){return`<div class="h"><div class="hn">${hn||'PCH BWP Hotel'}</div><div class="hs">${STATE.data?.settings?.address||''}</div></div>`;}
+
+function printCard(b,g,hn,opts={}){
+  const{taxable=true,breakfast=false}=opts;
+  const base=b.customRate||b.baseRate;
+  const gst=Math.round(base*.16);
+  const total=(taxable?(base+gst):base)*b.nights;
+  return hdr(hn)+`<h2>Guest Registration / Check-In Card</h2>
+  <div style="display:flex;gap:6px;justify-content:center;margin-bottom:8px">
+    <span style="padding:2px 10px;border:2px solid #333;border-radius:10px;font-size:10px;font-weight:700;background:${taxable?'#111':'#fff'};color:${taxable?'#fff':'#333'}">${taxable?'TAXABLE – GST 16%':'NON-TAXABLE'}</span>
+    <span style="padding:2px 10px;border:2px solid ${breakfast?'#2a7a2a':'#ccc'};border-radius:10px;font-size:10px;font-weight:700;color:${breakfast?'#2a7a2a':'#aaa'}">${breakfast?'COMP. BREAKFAST':'NO BREAKFAST'}</span>
+  </div>
+  <div class="s"><div class="st">Booking</div>
+    <div class="r"><span class="lb">Ref</span><span class="vl">${b.id}</span></div>
+    <div class="r"><span class="lb">Room</span><span class="vl">${b.room} (${b.category} – ${b.bedType})</span></div>
+    <div class="r"><span class="lb">Check-In</span><span class="vl">${b.checkIn}</span></div>
+    <div class="r"><span class="lb">Check-Out</span><span class="vl">${b.checkOut}</span></div>
+    <div class="r"><span class="lb">Nights</span><span class="vl">${b.nights}</span></div>
+    <div class="r"><span class="lb">Rate/Night</span><span class="vl">PKR ${base.toLocaleString()}</span></div>
+    ${taxable?`<div class="r"><span class="lb">GST 16%</span><span class="vl">PKR ${gst.toLocaleString()}</span></div>`:''}
+    <div class="r" style="border-bottom:2px solid #111"><span class="lb" style="font-weight:700">Total</span><span class="vl" style="font-size:13px;font-weight:900">PKR ${total.toLocaleString()}</span></div>
+    ${breakfast?`<div class="r"><span class="lb">Breakfast</span><span class="vl" style="color:#2a7a2a;font-weight:900">Complimentary</span></div>`:''}
+  </div>
+  <div class="s"><div class="st">Guest</div>
+    <div class="r"><span class="lb">Name</span><span class="vl">${g.name}</span></div>
+    ${g.company?`<div class="r"><span class="lb">Company</span><span class="vl" style="font-weight:900">${g.company}</span></div>`:''}
+    <div class="r"><span class="lb">ID</span><span class="vl">${g.idType||'—'} / ${g.idNo||'—'}</span></div>
+    <div class="r"><span class="lb">Phone</span><span class="vl">${g.phone||'—'}</span></div>
+  </div>
+  <div class="s" style="margin-top:6px">
+    <p style="font-size:10px;color:#555;margin-bottom:12px">I confirm the above is correct and agree to hotel terms.</p>
+    <div class="sig"><div class="sb">Guest Signature</div><div class="sb">Date</div><div class="sb">Front Desk</div></div>
+  </div>
+  <div class="ftr">Printed: ${new Date().toLocaleString()} · ${hn||'PCH BWP Hotel'}</div>`;
+}
+
+function printBill(b,g,kOrders,withTax,taxRate,hn){
+  const{rate,roomCharge,extras,kitchen,subtotal,tax,grand}=calcBill(b,kOrders,withTax?taxRate:0);
+  const bk=(kOrders||[]).filter(k=>k.bkId===b.id&&k.postedToBill);
+  return hdr(hn)+`<h2>${withTax?'Tax Invoice (GST '+taxRate+'%)':'Settlement Bill (No Tax)'}</h2>
+  <div class="s"><div class="st">Invoice</div>
+    <div class="r"><span class="lb">No</span><span class="vl">${b.id}-${withTax?'TAX':'NOTAX'}</span></div>
+    <div class="r"><span class="lb">Guest</span><span class="vl">${g.name}${g.company?' | '+g.company:''}</span></div>
+    <div class="r"><span class="lb">Room</span><span class="vl">${b.room} · ${b.category}</span></div>
+    <div class="r"><span class="lb">Stay</span><span class="vl">${b.checkIn} → ${b.checkOut} (${b.nights}n)</span></div>
+  </div>
+  <div class="s"><div class="st">Charges</div>
+    <table><tr><th>Description</th><th style="text-align:right">PKR</th></tr>
+    <tr><td>Room (${b.nights} × ${rate.toLocaleString()})</td><td style="text-align:right">${roomCharge.toLocaleString()}</td></tr>
+    ${(b.extraCharges||[]).map(x=>`<tr><td>${x.desc}</td><td style="text-align:right">${x.amount.toLocaleString()}</td></tr>`).join('')}
+    ${bk.map(k=>`<tr><td>Room Service ${k.time}</td><td style="text-align:right">${k.total.toLocaleString()}</td></tr>`).join('')}
+    </table>
+    <div class="tr" style="margin-top:6px"><span>Subtotal</span><span>${subtotal.toLocaleString()}</span></div>
+    ${withTax?`<div class="tr"><span>GST ${taxRate}%</span><span>${Math.round(tax).toLocaleString()}</span></div>`:''}
+    <div class="grand"><span>GRAND TOTAL</span><span>PKR ${grand.toLocaleString()}</span></div>
+    <div style="font-size:10px;margin-top:4px">Payment: <b>${b.paid?'PAID':'PENDING'}</b></div>
+  </div>
+  <div class="sig" style="margin-top:16px"><div class="sb">Guest</div><div class="sb">Cashier</div></div>
+  <div class="ftr">Printed: ${new Date().toLocaleString()}</div>`;
+}
+
+function printDayEnd(data,date){
+  const bks=data.bookings;const rooms=data.rooms;
+  const ih=bks.filter(b=>b.status==='checked-in');
+  const occ=rooms.filter(r=>r.status==='occupied').length;const tot=rooms.length;
+  const rr=ih.reduce((s,b)=>s+(b.customRate||b.baseRate),0);
+  const fb=data.kitchenOrders.filter(k=>k.date===date).reduce((s,k)=>s+k.total,0);
+  const inc=data.accounts.transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const exp=data.accounts.transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const hn=data.settings?.hotelName||'PCH BWP Hotel';
+  return hdr(hn)+`<h2>Day End Summary – ${date}</h2>
+  <div style="display:flex;gap:8px">
+    <div class="s" style="flex:1"><div class="st">Occupancy</div>
+      <div class="r"><span class="lb">Total</span><span class="vl">${tot}</span></div>
+      <div class="r"><span class="lb">Occupied</span><span class="vl">${occ} (${Math.round(occ/tot*100)}%)</span></div>
+      <div class="r"><span class="lb">Available</span><span class="vl">${rooms.filter(r=>r.status==='available').length}</span></div>
+    </div>
+    <div class="s" style="flex:1"><div class="st">Revenue</div>
+      <div class="r"><span class="lb">Rooms</span><span class="vl">PKR ${rr.toLocaleString()}</span></div>
+      <div class="r"><span class="lb">F&B</span><span class="vl">PKR ${fb.toLocaleString()}</span></div>
+      <div class="grand" style="font-size:11px"><span>Net</span><span>PKR ${(inc-exp).toLocaleString()}</span></div>
+    </div>
+  </div>
+  <div class="s"><div class="st">In-House Guests</div>
+    <table><tr><th>Room</th><th>Guest</th><th>Check-Out</th><th style="text-align:right">Rate</th></tr>
+    ${ih.map(b=>`<tr><td>${b.room}</td><td>${b.guest}</td><td>${b.checkOut}</td><td style="text-align:right">PKR ${(b.customRate||b.baseRate).toLocaleString()}</td></tr>`).join('')}
+    </table>
+  </div>
+  <div class="sig" style="margin-top:16px"><div class="sb">Night Auditor</div><div class="sb">Manager</div></div>
+  <div class="ftr">Generated: ${new Date().toLocaleString()}</div>`;
+}
+
+// ── Actions ────────────────────────────────────
+function doCheckin(bId){
+  upd(d=>{
+    const b=d.bookings.find(x=>x.id===bId);if(!b)return;
+    const r=d.rooms.find(x=>x.id===b.room);if(!r)return;
+    b.status='checked-in';b.paid=true;
+    r.status='occupied';r.guest=b.guest;r.checkIn=b.checkIn;r.checkOut=b.checkOut;r.guestId=b.guestId;r.bkId=b.id;
+    flash(b.guest+' checked in → Room '+b.room);
+    setState({roomModal:null,sheet:null});
+    const s=d.settings;if(s?.waNotifications){const n=(s.waNumber||'').replace(/\D/g,'');setTimeout(()=>window.open('https://wa.me/'+n+'?text='+encodeURIComponent('✅ CHECK-IN\nGuest: '+b.guest+'\nRoom: '+b.room+'\n'+b.checkIn+' → '+b.checkOut+'\nRate: '+fmt(b.customRate||b.baseRate)+'/night'),'_blank'),300);}
+  });
+}
+function doCheckout(bId){
+  upd(d=>{
+    const b=d.bookings.find(x=>x.id===bId);if(!b)return;
+    const{grand}=calcBill(b,d.kitchenOrders,d.settings?.taxRate||16);
+    b.status='checked-out';
+    const r=d.rooms.find(x=>x.id===b.room);if(r){r.status='cleaning';r.guest=null;r.checkIn=null;r.checkOut=null;r.guestId=null;r.bkId=null;}
+    const g=d.guests.find(x=>x.id===b.guestId);if(g){g.stays++;g.totalSpent+=grand;}
+    flash(b.guest+' checked out');setState({roomModal:null,sheet:null});
+    const s=d.settings;if(s?.waNotifications){const n=(s.waNumber||'').replace(/\D/g,'');setTimeout(()=>window.open('https://wa.me/'+n+'?text='+encodeURIComponent('🔴 CHECK-OUT\nGuest: '+b.guest+'\nRoom: '+b.room+'\nTotal: '+fmt(grand)),'_blank'),300);}
+  });
+}
+function doMarkClean(rId){upd(d=>{const r=d.rooms.find(x=>x.id===rId);if(r)r.status='available';});flash('Room '+rId+' available');setState({roomModal:null});}
+
+function doQuickCheckin({guest,room,form:f}){
+  const r=STATE.data.rooms.find(x=>x.id===room);if(!r)return;
+  const nights=Math.max(1,Math.round((new Date(f.checkOut)-new Date(f.checkIn))/86400000));
+  const cr=f.customRate?parseInt(f.customRate):null;
+  const rate=cr||(r.customRate||r.baseRate);
+  const bkId='BK-'+Date.now();
+  let gId=guest.id;
+  upd(d=>{
+    if(guest.id==='__new__'){
+      gId='G-'+Date.now();
+      d.guests.push({id:gId,name:guest.name,email:'',phone:guest.phone||'',nationality:guest.nationality||'',idType:'CNIC',idNo:guest.idNo||'',dob:'',vip:false,stays:0,totalSpent:0,notes:'',tags:[guest.company?'Corporate':'New'],customRate:cr,company:guest.company||'',idPhoto:''});
+    }
+    d.bookings.push({id:bkId,guest:guest.name,guestId:gId,room:r.id,category:r.category,bedType:r.bedType,baseRate:r.baseRate,customRate:cr,nights,extraCharges:[],paid:true,status:'checked-in',source:f.source||'Direct',notes:f.notes||'',checkIn:f.checkIn,checkOut:f.checkOut});
+    const rr=d.rooms.find(x=>x.id===r.id);
+    rr.status='occupied';rr.guest=guest.name;rr.checkIn=f.checkIn;rr.checkOut=f.checkOut;rr.guestId=gId;rr.bkId=bkId;
+    d.accounts.transactions.push({id:'TX-'+Date.now(),date:f.checkIn,desc:'Room '+r.id+' – '+guest.name+' ('+nights+'n)',type:'income',amount:rate*nights,category:'Room Revenue',ref:bkId});
+    flash('✓ '+guest.name+' checked in → Room '+r.id);
+    setState({quickCI:false,quickRoom:null,sheet:null});
+  });
+}
+
+// ── MENU ──────────────────────────────────────
+const MENU=[
+  {id:'M1',name:'Club Sandwich',price:350,cat:'Snacks'},{id:'M2',name:'Grilled Chicken',price:650,cat:'Main'},
+  {id:'M3',name:'Beef Burger',price:600,cat:'Main'},{id:'M4',name:'French Fries',price:250,cat:'Snacks'},
+  {id:'M5',name:'Pasta Alfredo',price:550,cat:'Main'},{id:'M6',name:'Mineral Water',price:100,cat:'Beverages'},
+  {id:'M7',name:'Fresh Juice',price:200,cat:'Beverages'},{id:'M8',name:'Tea / Coffee',price:150,cat:'Beverages'},
+  {id:'M9',name:'Chocolate Cake',price:350,cat:'Desserts'},{id:'M10',name:'Chapli Kabab',price:500,cat:'Main'},
+  {id:'M11',name:'Biryani',price:450,cat:'Main'},{id:'M12',name:'Caesar Salad',price:400,cat:'Salads'},
+];
+
+// ── HTML Helpers ──────────────────────────────
+const h=(tag,attrs={},children=[])=>{const el=document.createElement(tag);Object.entries(attrs).forEach(([k,v])=>{if(k==='style'&&typeof v==='object')Object.assign(el.style,v);else if(k.startsWith('on')&&typeof v==='function')el.addEventListener(k.slice(2).toLowerCase(),v);else if(k==='className')el.className=v;else el.setAttribute(k,v);});children.forEach(c=>{if(c==null||c===false||c===undefined)return;el.appendChild(typeof c==='string'||typeof c==='number'?document.createTextNode(String(c)):c);});return el;};
+
+function div(style,children=[]){return h('div',{style},children);}
+function btn(text,onClick,style){const b=h('button',{style},typeof text==='string'?[text]:[text]);b.addEventListener('click',onClick);return b;}
+function inp(value,onChange,attrs={}){const el=h('input',{value:value||'',...attrs});el.addEventListener('input',e=>onChange(e.target.value));return el;}
+function sel(value,onChange,options){
+  const el=h('select');
+  options.forEach(([v,t])=>{const o=h('option',{value:v},[t||v]);if(v===value)o.selected=true;el.appendChild(o);});
+  el.addEventListener('change',e=>onChange(e.target.value));
+  return el;
+}
+function lbl(text){return h('div',{style:{fontSize:10,color:T.muted,letterSpacing:'0.14em',textTransform:'uppercase',marginBottom:5,fontWeight:700}},[text]);}
+function slbl(text){return h('div',{style:{fontSize:11,color:T.sub,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:10,fontWeight:700,borderBottom:`1px solid ${T.border}`,paddingBottom:7}},[text]);}
+function badge(s){const c=SC[s]||T.muted;return h('span',{style:{fontSize:9,padding:'2px 8px',borderRadius:12,background:c+'22',color:c,border:`1px solid ${c}44`,fontWeight:700,letterSpacing:'0.08em',textTransform:'capitalize'}},[s]);}
+function tag2(text,c){return h('span',{style:{fontSize:9,padding:'2px 8px',borderRadius:12,background:c+'22',color:c,border:`1px solid ${c}44`,fontWeight:700}},[text]);}
+function kpi(label,value,color,sub){
+  return div({...styles.card,flex:1},[
+    lbl(label),
+    h('div',{style:{fontSize:19,fontWeight:800,color:color||T.text}},[String(value)]),
+    sub&&h('div',{style:{fontSize:10,color:T.muted,marginTop:3}},[sub])
+  ]);
+}
+function fieldRow(ltext,val,onChange,type='text',placeholder=''){
+  return div({marginBottom:12},[lbl(ltext),inp(val,onChange,{type,placeholder})]);
+}
+
+const styles={
+  card:{background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:16},
+  surface:{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:16},
+};
+
+// ── Render sections ───────────────────────────
+function renderDashboard(){
+  const d=STATE.data;
+  const occ=d.rooms.filter(r=>r.status==='occupied').length;
+  const rev=d.accounts.transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const exp=d.accounts.transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const profit=rev-exp;
+  const rate=Math.round((occ/d.rooms.length)*100);
+  const hasPerm=p=>STATE.user?.isAdmin||STATE.user?.permissions?.includes(p);
+
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      div({},[
+        h('div',{style:{fontSize:17,fontWeight:900,marginBottom:2}},['Good morning 👋']),
+        h('div',{style:{fontSize:12,color:T.sub}},[today()])
+      ]),
+      hasPerm('checkin')&&btn('⚡ Check In',()=>setState({quickCI:true,quickRoom:null,sheet:'quickCI'}),{background:T.green,border:'none',borderRadius:12,color:'#fff',padding:'10px 18px',fontSize:13,fontWeight:700,cursor:'pointer'})
+    ]),
+    div({display:'flex',gap:10,marginBottom:10},[kpi('Occupancy',rate+'%',T.accent,occ+'/'+d.rooms.length+' rooms'),kpi('Net Profit',fmt(profit),profit>=0?T.green:T.red)]),
+    div({display:'flex',gap:10,marginBottom:14},[kpi('Revenue',fmt(rev),T.gold),kpi('Active Bkgs',d.bookings.filter(b=>b.status!=='checked-out').length,T.purple)]),
+    // Room map
+    div({...styles.card,marginBottom:14},[
+      div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8},[
+        h('div',{style:{fontSize:10,color:T.muted,letterSpacing:'0.14em',textTransform:'uppercase',fontWeight:700}},['Live Room Map — tap to act']),
+        h('span',{style:{fontSize:11,color:T.accent,fontWeight:700}},[rate+'% occ.'])
+      ]),
+      div({height:4,background:T.border,borderRadius:2,marginBottom:10},[
+        div({height:'100%',width:rate+'%',background:`linear-gradient(90deg,${T.accent},${T.purple})`,borderRadius:2},[])
+      ]),
+      ...[{fl:1,label:'F1 · Deluxe'},{fl:2,label:'F2 · Executive'},{fl:3,label:'F3 · Standard'}].map(({fl,label})=>
+        div({marginBottom:10},[
+          h('div',{style:{fontSize:9,color:T.muted,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:5}},[label]),
+          div({display:'flex',flexWrap:'wrap',gap:5},
+            d.rooms.filter(r=>r.floor===fl).map(r=>{
+              const c=SC[r.status]||T.muted;
+              const b=h('button',{className:'room-btn',style:{borderColor:c+'44',background:c+'18'}});
+              b.innerHTML=`<div style="font-size:10px;font-weight:800;color:${c}">${r.id}</div><div style="font-size:7px;color:${T.muted};text-transform:capitalize;margin-top:1px">${r.status.slice(0,3)}</div>`;
+              b.addEventListener('click',()=>setState({roomModal:r}));
+              return b;
+            })
+          )
+        ])
+      )
+    ]),
+    // Upcoming
+    div(styles.card,[
+      slbl('Upcoming Check-Ins'),
+      ...d.bookings.filter(b=>b.status==='confirmed').length===0
+        ?[h('div',{style:{fontSize:12,color:T.muted}},['No pending arrivals'])]
+        :d.bookings.filter(b=>b.status==='confirmed').map(b=>
+          div({display:'flex',justifyContent:'space-between',alignItems:'center',padding:'9px 0',borderBottom:`1px solid ${T.border}`},[
+            div({},[h('div',{style:{fontSize:13,fontWeight:700}},[b.guest]),h('div',{style:{fontSize:11,color:T.sub}},['Rm '+b.room+' · '+b.category+' · '+b.nights+'n'])]),
+            hasPerm('checkin')&&btn('✓ In',()=>doCheckin(b.id),{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'6px 12px',fontSize:12,fontWeight:700,cursor:'pointer'})
+          ])
+        )
+    ])
+  ]);
+}
+
+function renderRooms(){
+  const d=STATE.data;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Rooms ('+d.rooms.length+')']),
+      (STATE.user?.isAdmin||STATE.user?.permissions?.includes('rates'))&&btn('✏ Rates',()=>setState({sheet:'updateRate',form:{category:'Deluxe',bedType:'Single'}}),{background:T.gold+'22',border:`1px solid ${T.gold}44`,borderRadius:8,color:T.gold,padding:'6px 12px',fontSize:11,fontWeight:700,cursor:'pointer'})
+    ]),
+    ...[{fl:1,cat:'Deluxe',c:T.accent},{fl:2,cat:'Executive',c:T.gold},{fl:3,cat:'Standard',c:T.purple}].map(({fl,cat,c})=>
+      div({marginBottom:18},[
+        slbl('Floor '+fl+' · '+cat),
+        div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:8},
+          d.rooms.filter(r=>r.floor===fl).map(r=>{
+            const sc=SC[r.status]||T.muted;
+            const card=div({...styles.card,padding:12,borderColor:sc+'44',cursor:'pointer'},[
+              div({display:'flex',justifyContent:'space-between',marginBottom:5},[h('div',{style:{fontSize:16,fontWeight:900}},['#'+r.id]),badge(r.status)]),
+              h('div',{style:{fontSize:10,color:T.sub,marginBottom:3}},[r.bedType+' Bed']),
+              h('div',{style:{fontSize:11,color:c,fontWeight:700}},[fmt(r.customRate||r.baseRate)+'/n']),
+              r.guest&&h('div',{style:{fontSize:10,color:T.accent,marginTop:3}},['👤 '+r.guest.split(' ')[0]])
+            ]);
+            card.addEventListener('click',()=>setState({roomModal:r}));
+            return card;
+          })
+        )
+      ])
+    )
+  ]);
+}
+
+function renderBookings(){
+  const d=STATE.data;
+  const hasPerm=p=>STATE.user?.isAdmin||STATE.user?.permissions?.includes(p);
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Reservations']),
+      btn('+ New',()=>setState({sheet:'newBooking',form:{source:'Direct'}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    // CI Card options
+    div({...styles.surface,marginBottom:12,padding:10},[
+      h('div',{style:{fontSize:10,color:T.muted,marginBottom:7,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em'}},['📋 Check-In Card Options']),
+      div({display:'flex',gap:8,marginBottom:7},[
+        btn('Taxable GST 16%',()=>setState({globalCiOpts:{...STATE.globalCiOpts,taxable:true}}),{flex:1,padding:'6px',background:STATE.globalCiOpts.taxable?T.accent+'33':T.surface,border:`1px solid ${STATE.globalCiOpts.taxable?T.accent:T.border}`,borderRadius:7,color:STATE.globalCiOpts.taxable?T.accent:T.muted,fontSize:11,fontWeight:700,cursor:'pointer'}),
+        btn('Non-Taxable',()=>setState({globalCiOpts:{...STATE.globalCiOpts,taxable:false}}),{flex:1,padding:'6px',background:!STATE.globalCiOpts.taxable?T.purple+'33':T.surface,border:`1px solid ${!STATE.globalCiOpts.taxable?T.purple:T.border}`,borderRadius:7,color:!STATE.globalCiOpts.taxable?T.purple:T.muted,fontSize:11,fontWeight:700,cursor:'pointer'})
+      ]),
+      btn(STATE.globalCiOpts.breakfast?'☕ Breakfast: ON':'☕ Breakfast: OFF',()=>setState({globalCiOpts:{...STATE.globalCiOpts,breakfast:!STATE.globalCiOpts.breakfast}}),{width:'100%',padding:'6px',background:STATE.globalCiOpts.breakfast?T.green+'33':T.surface,border:`1px solid ${STATE.globalCiOpts.breakfast?T.green:T.border}`,borderRadius:7,color:STATE.globalCiOpts.breakfast?T.green:T.muted,fontSize:11,fontWeight:700,cursor:'pointer'})
+    ]),
+    ...d.bookings.map(b=>{
+      const rate=b.customRate||b.baseRate;
+      const kc=d.kitchenOrders.filter(k=>k.bkId===b.id&&k.postedToBill).reduce((s,k)=>s+k.total,0);
+      const sub=rate*b.nights+(b.extraCharges||[]).reduce((s,x)=>s+x.amount,0)+kc;
+      return div({...styles.card,marginBottom:10},[
+        div({display:'flex',justifyContent:'space-between',marginBottom:6},[
+          div({},[h('div',{style:{fontSize:14,fontWeight:800}},[b.guest]),h('div',{style:{fontSize:11,color:T.sub}},[b.id+' · Rm '+b.room+' · '+b.category])]),
+          badge(b.status)
+        ]),
+        h('div',{style:{fontSize:11,color:T.sub,marginBottom:4}},['📅 '+b.checkIn+' → '+b.checkOut+' · '+b.nights+'n']),
+        h('div',{style:{fontSize:11,marginBottom:8}},[h('span',{style:{color:T.gold,fontWeight:700}},[fmt(rate)+'/n']),kc>0&&h('span',{style:{color:T.green,marginLeft:8}},['+F&B '+fmt(kc)])]),
+        div({display:'flex',gap:6,flexWrap:'wrap'},[
+          b.status==='confirmed'&&hasPerm('checkin')&&btn('✓ Check In',()=>doCheckin(b.id),{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+          b.status==='confirmed'&&btn('📋 Card',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:'',nationality:'',idType:'',idNo:''};showPrint(printCard(b,g,d.settings?.hotelName,STATE.globalCiOpts));},{background:T.border,border:'none',borderRadius:8,color:T.sub,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+          b.status==='checked-in'&&hasPerm('checkout')&&btn('✗ Check Out',()=>doCheckout(b.id),{background:T.red+'22',border:`1px solid ${T.red}44`,borderRadius:8,color:T.red,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+          (b.status==='checked-in'||b.status==='checked-out')&&...[
+            btn('📋 Card',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:'',nationality:'',idType:'',idNo:''};showPrint(printCard(b,g,d.settings?.hotelName,STATE.globalCiOpts));},{background:T.border,border:'none',borderRadius:8,color:T.sub,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+            btn('📊 Sum',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:''};showPrint(printBill(b,g,d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName));},{background:T.purple+'22',border:`1px solid ${T.purple}44`,borderRadius:8,color:T.purple,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+            btn('🧾 +GST',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',idNo:''};showPrint(printBill(b,g,d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName));},{background:T.gold+'22',border:`1px solid ${T.gold}44`,borderRadius:8,color:T.gold,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+            btn('📄 No Tax',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',idNo:''};showPrint(printBill(b,g,d.kitchenOrders,false,0,d.settings?.hotelName));},{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
+          ]
+        ])
+      ]);
+    })
+  ]);
+}
+
+function renderGuests(){
+  const d=STATE.data;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Guests ('+d.guests.length+')']),
+      btn('+ Add',()=>setState({sheet:'addGuest',form:{idType:'CNIC'}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    ...d.guests.map(g=>{
+      const open=STATE.detail?.id===g.id;
+      const card=div({...styles.card,marginBottom:8,cursor:'pointer'},[
+        div({display:'flex',gap:10,alignItems:'center'},[
+          div({width:38,height:38,borderRadius:'50%',background:g.vip?T.gold+'22':T.accent+'22',border:`2px solid ${g.vip?T.gold:T.accent}44`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:900,color:g.vip?T.gold:T.accent,flexShrink:0},[g.name.split(' ').map(n=>n[0]).join('')]),
+          div({flex:1},[
+            div({display:'flex',alignItems:'center',gap:4,marginBottom:1,flexWrap:'wrap'},[
+              h('span',{style:{fontSize:13,fontWeight:800}},[g.name]),
+              g.vip&&tag2('VIP',T.gold),
+              g.company&&tag2(g.company,T.accent)
+            ]),
+            h('div',{style:{fontSize:11,color:T.sub}},[g.phone]),
+            h('div',{style:{fontSize:10,color:T.muted}},[g.stays+' stays'+(g.customRate?' · Rate: '+fmt(g.customRate)+'/n':'')])
+          ]),
+          h('span',{style:{color:T.muted}},[open?'↓':'›'])
+        ]),
+        open&&div({marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`},[
+          div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,fontSize:11,marginBottom:8},
+            [['Phone',g.phone||'—'],['Nationality',g.nationality||'—'],['ID',g.idNo||'—'],['Company',g.company||'—']].map(([k,v])=>
+              h('div',{},[h('span',{style:{color:T.muted}},[k+': ']),h('span',{},[v])])
+            )
+          ),
+          g.idPhoto&&div({marginTop:6},[
+            lbl('ID Card'),
+            h('img',{src:g.idPhoto,style:{width:'100%',borderRadius:8,border:`1px solid ${T.border}`,maxHeight:160,objectFit:'cover'}})
+          ])
+        ])
+      ]);
+      card.addEventListener('click',()=>setState({detail:open?null:{id:g.id}}));
+      return card;
+    })
+  ]);
+}
+
+function renderKitchen(){
+  const d=STATE.data;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Kitchen Orders']),
+      btn('+ Order',()=>setState({sheet:'newKO',koForm:{room:'',items:{}}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    !d.kitchenOrders.length&&h('div',{style:{fontSize:12,color:T.muted}},['No orders yet.']),
+    ...[...d.kitchenOrders].reverse().map(k=>
+      div({...styles.card,marginBottom:10},[
+        div({display:'flex',justifyContent:'space-between',marginBottom:6},[
+          div({},[h('div',{style:{fontSize:13,fontWeight:800}},['Room '+k.room+' · '+k.guest]),h('div',{style:{fontSize:10,color:T.sub}},[k.id+' · '+k.date+' '+k.time])]),
+          h('span',{style:{fontSize:9,padding:'2px 8px',borderRadius:12,background:(k.status==='served'?T.green:T.gold)+'22',color:(k.status==='served'?T.green:T.gold),border:`1px solid ${(k.status==='served'?T.green:T.gold)}44`,fontWeight:700,textTransform:'capitalize'}},[k.status])
+        ]),
+        h('div',{style:{fontSize:11,color:T.sub,marginBottom:6}},[k.items.map(i=>i.qty+'× '+i.name).join(' · ')]),
+        div({display:'flex',justifyContent:'space-between',alignItems:'center'},[
+          div({},[h('span',{style:{fontSize:15,fontWeight:800,color:T.gold}},[fmt(k.total)]),h('span',{style:{fontSize:10,color:k.postedToBill?T.green:T.red,marginLeft:8}},[k.postedToBill?'✓ On Bill':'Not on Bill'])]),
+          k.status==='preparing'&&btn('Mark Served',()=>upd(d=>{const x=d.kitchenOrders.find(x=>x.id===k.id);if(x)x.status='served';flash('Marked served');}),{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'6px 12px',fontSize:11,fontWeight:700,cursor:'pointer'})
+        ])
+      ])
+    )
+  ]);
+}
+
+function renderAccounts(){
+  const d=STATE.data;
+  const rev=d.accounts.transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const exp=d.accounts.transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  const profit=rev-exp;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Accounts']),
+      btn('+ Entry',()=>setState({sheet:'addTx',form:{type:'income',category:'Room Revenue'}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    div({display:'flex',gap:10,marginBottom:10},[kpi('Income',fmt(rev),T.green),kpi('Expenses',fmt(exp),T.red)]),
+    div({...styles.card,marginBottom:14,textAlign:'center'},[lbl('Net Profit'),h('div',{style:{fontSize:26,fontWeight:900,color:profit>=0?T.green:T.red}},[(profit>=0?'+':'')+fmt(profit)])]),
+    slbl('Ledger'),
+    ...[...d.accounts.transactions].reverse().map(tx=>
+      div({...styles.card,marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center'},[
+        div({},[h('div',{style:{fontSize:12,fontWeight:600}},[tx.desc]),h('div',{style:{fontSize:10,color:T.muted}},[tx.date+' · '+tx.category])]),
+        h('div',{style:{fontSize:13,fontWeight:800,color:tx.type==='income'?T.green:T.red}},[(tx.type==='income'?'+':'-')+fmt(tx.amount)])
+      ])
+    )
+  ]);
+}
+
+function renderReports(){
+  const d=STATE.data;
+  const occ=d.rooms.filter(r=>r.status==='occupied').length;
+  const rev=d.accounts.transactions.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const exp=d.accounts.transactions.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    h('div',{style:{fontSize:17,fontWeight:900,marginBottom:14}},['Reports & Print']),
+    div({...styles.card,marginBottom:10,display:'flex',gap:14,alignItems:'center',cursor:'pointer',borderColor:T.accent+'44'},[
+      div({width:44,height:44,borderRadius:10,background:T.accent+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,flexShrink:0},['📊']),
+      div({},[h('div',{style:{fontSize:14,fontWeight:800,color:T.accent,marginBottom:2}},['Day End Summary']),h('div',{style:{fontSize:11,color:T.sub}},['Full daily report'])])
+    ].map((el,i)=>{if(i===0)el.style.cursor='default';return el;})),
+    h('div',{style:{display:'none'}}),
+    ...(()=>{
+      const c=div({...styles.card,marginBottom:10,display:'flex',gap:14,alignItems:'center',cursor:'pointer',borderColor:T.accent+'44'},[
+        div({width:44,height:44,borderRadius:10,background:T.accent+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22},[' 📊']),
+        div({},[h('div',{style:{fontSize:14,fontWeight:800,color:T.accent}},['Day End Summary'])])
+      ]);
+      c.addEventListener('click',()=>showPrint(printDayEnd(d,today())));
+      return [c];
+    })(),
+    div(styles.card,[
+      slbl('Quick Stats'),
+      ...[['Rooms Occupied',occ+'/'+d.rooms.length],['Revenue',fmt(rev)],['Expenses',fmt(exp)],['Net Profit',fmt(rev-exp)],['Guests',d.guests.length],['Bookings',d.bookings.length]].map(([k,v])=>
+        div({display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:`1px solid ${T.border}`,fontSize:12},[
+          h('span',{style:{color:T.sub}},[k]),h('span',{style:{fontWeight:700}},[String(v)])
+        ])
+      )
+    ])
+  ]);
+}
+
+function renderUsers(){
+  const d=STATE.data;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Users']),
+      STATE.user?.isAdmin&&btn('+ User',()=>setState({sheet:'addUser',form:{permissions:[],role:'Staff'}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    ...d.users.map(u=>
+      div({...styles.card,marginBottom:10},[
+        div({display:'flex',gap:10,alignItems:'center'},[
+          div({width:38,height:38,borderRadius:'50%',background:u.isAdmin?T.gold+'22':T.accent+'22',border:`2px solid ${u.isAdmin?T.gold:T.accent}44`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,color:u.isAdmin?T.gold:T.accent,flexShrink:0},[u.name.slice(0,2).toUpperCase()]),
+          div({flex:1},[
+            div({display:'flex',alignItems:'center',gap:6,marginBottom:2},[
+              h('span',{style:{fontSize:13,fontWeight:800}},[u.name]),
+              u.isAdmin&&tag2('ADMIN',T.gold),
+              tag2(u.active?'Active':'Inactive',u.active?T.green:T.red)
+            ]),
+            h('div',{style:{fontSize:11,color:T.sub}},['@'+u.username+' · '+u.role])
+          ]),
+          !u.isAdmin&&STATE.user?.isAdmin&&btn(u.active?'Disable':'Enable',()=>upd(d=>{const x=d.users.find(y=>y.id===u.id);if(x)x.active=!x.active;flash('User '+(x.active?'on':'off'));}),{background:u.active?T.red+'22':T.green+'22',border:`1px solid ${u.active?T.red:T.green}44`,borderRadius:8,color:u.active?T.red:T.green,padding:'6px 12px',fontSize:10,fontWeight:700,cursor:'pointer'})
+        ]),
+        !u.isAdmin&&div({marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}`},[
+          lbl('Permissions'),
+          div({display:'flex',flexWrap:'wrap',gap:5},ALL_PERMS.map(p=>tag2(p,u.permissions?.includes(p)?T.accent:T.muted)))
+        ])
+      ])
+    )
+  ]);
+}
+
+function renderSettings(){
+  const d=STATE.data;
+  const s=d.settings||{};
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    h('div',{style:{fontSize:17,fontWeight:900,marginBottom:14}},['Settings']),
+    div({...styles.card,marginBottom:12},[
+      slbl('Hotel Information'),
+      ...['hotelName','address','phone','email'].map(k=>
+        div({marginBottom:10},[lbl(k),inp(STATE.form[k]!==undefined?STATE.form[k]:s[k]||'',v=>setState({form:{...STATE.form,[k]:v}}))])
+      ),
+      div({marginBottom:10},[lbl('GST Rate (%)'),inp(STATE.form.taxRate!==undefined?String(STATE.form.taxRate):String(s.taxRate||16),v=>setState({form:{...STATE.form,taxRate:parseInt(v)||16}}),{type:'number'})]),
+      btn('Save',()=>upd(d=>{Object.assign(d.settings,STATE.form);flash('Settings saved');setState({form:{}});}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer',width:'100%'})
+    ]),
+    div({...styles.card,marginBottom:12},[
+      slbl('WhatsApp'),
+      div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12},[
+        div({},[h('div',{style:{fontSize:13,fontWeight:700}},['WA Alerts']),h('div',{style:{fontSize:11,color:T.sub}},['Check-in & checkout'])]),
+        btn(s.waNotifications?'● ON':'○ OFF',()=>upd(d=>{d.settings.waNotifications=!d.settings.waNotifications;flash('WA '+(d.settings.waNotifications?'on':'off'));}),{background:s.waNotifications?T.green:T.border,border:'none',borderRadius:8,color:s.waNotifications?'#fff':T.muted,padding:'7px 14px',fontWeight:700,cursor:'pointer'})
+      ]),
+      lbl('WhatsApp Number'),
+      inp(STATE.form.waNumber!==undefined?STATE.form.waNumber:s.waNumber||'',v=>setState({form:{...STATE.form,waNumber:v}}),{style:{marginBottom:10}}),
+      btn('Save Number',()=>upd(d=>{if(STATE.form.waNumber!==undefined)d.settings.waNumber=STATE.form.waNumber;flash('Saved');}),{background:T.green+'33',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer',width:'100%'})
+    ])
+  ]);
+}
+
+function renderEmployees(){
+  const d=STATE.data;
+  return div({padding:14,maxWidth:560,margin:'0 auto'},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14},[
+      h('div',{style:{fontSize:17,fontWeight:900}},['Staff Directory']),
+      btn('+ Add',()=>setState({sheet:'addEmp',form:{dept:'Front Office',shift:'Morning'}}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',padding:'9px 14px',fontSize:12,fontWeight:700,cursor:'pointer'})
+    ]),
+    ...['Front Office','Housekeeping','F&B','Security'].flatMap(dept=>{
+      const emps=d.employees.filter(e=>e.dept===dept);
+      if(!emps.length)return[];
+      return[slbl(dept),...emps.map(em=>{
+        const open=STATE.detail?.id===em.id;
+        const c=div({...styles.card,marginBottom:8,cursor:'pointer'},[
+          div({display:'flex',gap:10,alignItems:'center'},[
+            div({width:36,height:36,borderRadius:'50%',background:T.purple+'22',border:`1px solid ${T.purple}44`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900,color:T.purple,flexShrink:0},[em.name.split(' ').map(n=>n[0]).join('')]),
+            div({flex:1},[h('div',{style:{fontSize:13,fontWeight:700}},[em.name]),h('div',{style:{fontSize:11,color:T.sub}},[em.role+' · '+em.shift])]),
+            h('span',{style:{fontSize:9,padding:'2px 8px',borderRadius:12,background:(em.status==='active'?T.green:T.gold)+'22',color:(em.status==='active'?T.green:T.gold),border:`1px solid ${(em.status==='active'?T.green:T.gold)}44`,fontWeight:700,textTransform:'capitalize'}},[em.status])
+          ]),
+          open&&div({marginTop:10,paddingTop:10,borderTop:`1px solid ${T.border}`,display:'grid',gridTemplateColumns:'1fr 1fr',gap:6,fontSize:11},
+            [['Email',em.email||'—'],['Phone',em.phone||'—'],['Since',em.since],['Salary',fmt(em.salary)+'/mo']].map(([k,v])=>h('div',{},[h('span',{style:{color:T.muted}},[k+': ']),h('span',{},[v])]))
+          )
+        ]);
+        c.addEventListener('click',()=>setState({detail:open?null:{id:em.id}}));
+        return c;
+      })];
+    })
+  ]);
+}
+
+// ── Sheets ────────────────────────────────────
+function renderSheet(){
+  const {sheet,form,data:d,koForm,ciOpts}=STATE;
+  if(!sheet)return null;
+
+  const overlay=div({position:'fixed',inset:0,background:'rgba(0,0,0,.75)',zIndex:500,display:'flex',alignItems:'flex-end'});
+  const inner=div({background:T.card,border:`1px solid ${T.border}`,borderRadius:'18px 18px 0 0',padding:'20px 18px 32px',width:'100%',maxHeight:'92vh',overflowY:'auto',maxWidth:560});
+  overlay.addEventListener('click',()=>setState({sheet:null,form:{}}));
+  inner.addEventListener('click',e=>e.stopPropagation());
+
+  const title=h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}},[
+    h('div',{style:{fontSize:15,color:T.text,fontWeight:800}},[sheet==='newBooking'?'New Reservation':sheet==='addGuest'?'Add Guest Profile':sheet==='newKO'?'Kitchen Order':sheet==='addEmp'?'Add Staff':sheet==='addTx'?'Record Transaction':sheet==='addUser'?'Create User':sheet==='updateRate'?'Update Rates':sheet==='roomModal'?'Room':'Options']),
+    btn('×',()=>setState({sheet:null,form:{}}),{background:'none',border:'none',color:T.muted,fontSize:22,cursor:'pointer'})
+  ]);
+  inner.appendChild(title);
+
+  if(sheet==='newBooking'){
+    ['guest','checkIn','checkOut'].forEach(k=>{
+      const type=k.includes('check')?'date':'text';
+      const ltext={'guest':'Guest Name *','checkIn':'Check-In *','checkOut':'Check-Out *'}[k];
+      inner.appendChild(fieldRow(ltext,form[k],v=>setState({form:{...form,[k]:v}}),type));
+    });
+    inner.appendChild(div({marginBottom:12},[lbl('Room *'),sel(form.room||'',v=>setState({form:{...form,room:v}}),[['','Select available room'],...d.rooms.filter(r=>r.status==='available').map(r=>[String(r.id),'Room '+r.id+' — '+r.category+' '+r.bedType+' ('+fmt(r.customRate||r.baseRate)+'/n)'])])]));
+    inner.appendChild(fieldRow('Custom Rate (blank = standard)',form.customRate,v=>setState({form:{...form,customRate:v}}),'number'));
+    inner.appendChild(div({marginBottom:12},[lbl('Source'),sel(form.source||'Direct',v=>setState({form:{...form,source:v}}),['Direct','OTA','Corporate','Walk-in','Phone'].map(s=>[s,s]))]));
+    inner.appendChild(fieldRow('Notes',form.notes,v=>setState({form:{...form,notes:v}})));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Confirm',()=>{
+        const{guest,room,checkIn,checkOut,source,notes,customRate}=form;
+        if(!guest||!room||!checkIn||!checkOut)return flash('Fill all required fields',true);
+        const r=d.rooms.find(x=>x.id===parseInt(room));if(!r)return;
+        const nights=Math.max(1,Math.round((new Date(checkOut)-new Date(checkIn))/86400000));
+        const cr=customRate?parseInt(customRate):null;
+        const id='BK-'+Date.now();
+        upd(dd=>{
+          dd.bookings.push({id,guest,guestId:'',room:r.id,category:r.category,bedType:r.bedType,baseRate:r.baseRate,customRate:cr,nights,extraCharges:[],paid:false,status:'confirmed',source:source||'Direct',notes:notes||'',checkIn,checkOut});
+          dd.rooms.find(x=>x.id===r.id).status='reserved';
+          dd.accounts.transactions.push({id:'TX-'+Date.now(),date:checkIn,desc:'Room '+r.id+' – '+guest+' ('+nights+'n)',type:'income',amount:(cr||r.baseRate)*nights,category:'Room Revenue',ref:id});
+        });
+        flash('Booking created');setState({sheet:null,form:{}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='addGuest'){
+    ['name','email','phone','nationality','dob','idNo'].forEach(k=>{
+      const labels={name:'Full Name *',email:'Email',phone:'Phone',nationality:'Nationality',dob:'Date of Birth',idNo:'ID Number'};
+      const types={dob:'date',email:'email',phone:'tel'};
+      inner.appendChild(fieldRow(labels[k],form[k],v=>setState({form:{...form,[k]:v}}),types[k]||'text'));
+    });
+    inner.appendChild(div({marginBottom:12},[lbl('ID Type'),sel(form.idType||'CNIC',v=>setState({form:{...form,idType:v}}),['CNIC','Passport',"Driver's License",'B-Form'].map(s=>[s,s]))]));
+    inner.appendChild(fieldRow('Company (optional)',form.company,v=>setState({form:{...form,company:v}})));
+    inner.appendChild(fieldRow('Custom Room Rate (optional)',form.customRate,v=>setState({form:{...form,customRate:v}}),'number'));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Save Guest',()=>{
+        const{name,phone,nationality,idType,idNo,dob,email,customRate,company}=form;
+        if(!name)return flash('Name required',true);
+        const id='G-'+Date.now();
+        upd(dd=>{dd.guests.push({id,name,email:email||'',phone:phone||'',nationality:nationality||'',idType:idType||'CNIC',idNo:idNo||'',dob:dob||'',vip:false,stays:0,totalSpent:0,notes:'',tags:[company?'Corporate':'New'],customRate:customRate?parseInt(customRate):null,company:company||'',idPhoto:''});});
+        flash('Guest added: '+name);setState({sheet:null,form:{}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='newKO'){
+    const occ=d.rooms.filter(r=>r.status==='occupied');
+    inner.appendChild(div({marginBottom:12},[lbl('Room *'),sel(koForm.room,v=>setState({koForm:{...koForm,room:v}}),[['','Select occupied room'],...occ.map(r=>[String(r.id),'Room '+r.id+' — '+r.guest])])]));
+    ['Snacks','Main','Salads','Beverages','Desserts'].forEach(cat=>{
+      inner.appendChild(h('div',{style:{fontSize:10,color:T.muted,fontWeight:700,marginBottom:5,textTransform:'uppercase',marginTop:8}},[cat]));
+      MENU.filter(m=>m.cat===cat).forEach(m=>{
+        const qty=koForm.items[m.id]||0;
+        const row=div({display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${T.border}`},[
+          div({},[h('div',{style:{fontSize:12,fontWeight:600}},[m.name]),h('div',{style:{fontSize:10,color:T.gold}},[fmt(m.price)])]),
+          div({display:'flex',alignItems:'center',gap:8},[
+            btn('−',()=>setState({koForm:{...STATE.koForm,items:{...STATE.koForm.items,[m.id]:Math.max(0,(STATE.koForm.items[m.id]||0)-1)}}}),{width:26,height:26,borderRadius:6,background:T.border,border:'none',color:T.text,fontSize:14,fontWeight:700,cursor:'pointer'}),
+            h('span',{style:{fontSize:13,fontWeight:700,minWidth:16,textAlign:'center'}},[String(qty)]),
+            btn('+',()=>setState({koForm:{...STATE.koForm,items:{...STATE.koForm.items,[m.id]:(STATE.koForm.items[m.id]||0)+1}}}),{width:26,height:26,borderRadius:6,background:T.accent,border:'none',color:'#fff',fontSize:14,fontWeight:700,cursor:'pointer'})
+          ])
+        ]);
+        inner.appendChild(row);
+      });
+    });
+    const total=Object.entries(koForm.items).filter(([,q])=>q>0).reduce((s,[id,q])=>s+(MENU.find(m=>m.id===id)?.price||0)*q,0);
+    inner.appendChild(div({...styles.surface,marginBottom:14,marginTop:8},[
+      div({display:'flex',justifyContent:'space-between'},[h('span',{style:{fontSize:12,color:T.sub}},['Order Total']),h('span',{style:{fontSize:18,fontWeight:900,color:T.gold}},[fmt(total)])]),
+      h('div',{style:{fontSize:10,color:T.green,marginTop:4}},['✓ Auto-posted to room bill'])
+    ]));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Place Order',()=>{
+        if(!koForm.room)return flash('Select a room',true);
+        const roomId=parseInt(koForm.room);
+        const bk=d.bookings.find(b=>b.room===roomId&&b.status==='checked-in');
+        if(!bk)return flash('No checked-in guest in this room',true);
+        const items=Object.entries(koForm.items).filter(([,q])=>q>0).map(([id,qty])=>{const m=MENU.find(x=>x.id===id);return{name:m.name,qty,price:m.price};});
+        if(!items.length)return flash('Add at least one item',true);
+        const tot=items.reduce((s,i)=>s+i.qty*i.price,0);
+        const id='KO-'+Date.now();
+        const now=new Date();const time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+        upd(dd=>{
+          dd.kitchenOrders.push({id,room:roomId,guest:bk.guest,bkId:bk.id,items,total:tot,date:today(),time,status:'preparing',postedToBill:true});
+          dd.accounts.transactions.push({id:'TX-'+Date.now(),date:today(),desc:'Kitchen '+id+' – Room '+roomId,type:'income',amount:tot,category:'F&B Revenue',ref:id});
+        });
+        flash('✓ Order posted to Room '+roomId+' bill');setState({sheet:null,koForm:{room:'',items:{}}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='addTx'){
+    inner.appendChild(div({marginBottom:12},[lbl('Type'),div({display:'flex',gap:8},[
+      btn('+ Income',()=>setState({form:{...form,type:'income'}}),{flex:1,padding:'10px',background:form.type==='income'?T.green+'33':T.surface,border:`1px solid ${form.type==='income'?T.green:T.border}`,borderRadius:8,color:form.type==='income'?T.green:T.muted,fontWeight:700,fontSize:12,cursor:'pointer'}),
+      btn('− Expense',()=>setState({form:{...form,type:'expense'}}),{flex:1,padding:'10px',background:form.type==='expense'?T.red+'33':T.surface,border:`1px solid ${form.type==='expense'?T.red:T.border}`,borderRadius:8,color:form.type==='expense'?T.red:T.muted,fontWeight:700,fontSize:12,cursor:'pointer'})
+    ])]));
+    inner.appendChild(fieldRow('Description *',form.desc,v=>setState({form:{...form,desc:v}})));
+    inner.appendChild(fieldRow('Amount (PKR) *',form.amount,v=>setState({form:{...form,amount:v}}),'number'));
+    inner.appendChild(div({marginBottom:18},[lbl('Category'),sel(form.category||'Room Revenue',v=>setState({form:{...form,category:v}}),['Room Revenue','F&B Revenue','Laundry','Spa','Operating Expenses','Payroll','Maintenance','Other'].map(s=>[s,s]))]));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Save',()=>{
+        const{desc,type,amount,category}=form;
+        if(!desc||!type||!amount)return flash('Fill all fields',true);
+        upd(dd=>{dd.accounts.transactions.push({id:'TX-'+Date.now(),date:today(),desc,type,amount:parseFloat(amount),category:category||'Other',ref:''});});
+        flash('Transaction?. recorded');setState({sheet:null,form:{}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='addEmp'){
+    ['name','role','email','phone','salary'].forEach(k=>{
+      inner.appendChild(fieldRow(k==='salary'?'Salary (PKR/mo)':k.charAt(0).toUpperCase()+k.slice(1),form[k],v=>setState({form:{...form,[k]:v}}),k==='salary'?'number':k==='email'?'email':k==='phone'?'tel':'text'));
+    });
+    inner.appendChild(div({marginBottom:12},[lbl('Department *'),sel(form.dept||'Front Office',v=>setState({form:{...form,dept:v}}),['Front Office','Housekeeping','F&B','Security','Maintenance'].map(s=>[s,s]))]));
+    inner.appendChild(div({marginBottom:18},[lbl('Shift'),sel(form.shift||'Morning',v=>setState({form:{...form,shift:v}}),['Morning','Evening','Night'].map(s=>[s,s]))]));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Add Staff',()=>{
+        const{name,role,dept,phone,email,shift,salary}=form;
+        if(!name||!role||!dept)return flash('Fill required fields',true);
+        upd(dd=>{dd.employees.push({id:'E-'+Date.now(),name,role,dept,phone:phone||'',email:email||'',shift:shift||'Morning',status:'active',since:today(),salary:parseInt(salary)||0});});
+        flash('Staff added: '+name);setState({sheet:null,form:{}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='updateRate'){
+    inner.appendChild(div({marginBottom:12},[lbl('Category'),sel(form.category||'Deluxe',v=>setState({form:{...form,category:v}}),['Deluxe','Executive','Standard'].map(s=>[s,s]))]));
+    inner.appendChild(div({marginBottom:12},[lbl('Bed Type'),sel(form.bedType||'Single',v=>setState({form:{...form,bedType:v}}),['Single','Twin','Triple'].map(s=>[s,s]))]));
+    inner.appendChild(fieldRow('New Rate (PKR, before GST)',form.newRate,v=>setState({form:{...form,newRate:v}}),'number','e.g. 5500'));
+    if(form.newRate)inner.appendChild(div({...styles.surface,marginBottom:14,textAlign:'center'},[lbl('With 16% GST'),h('div',{style:{fontSize:18,fontWeight:900,color:T.gold}},[fmt(Math.round(parseInt(form.newRate||0)*1.16))])]));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Update',()=>{
+        const{category,bedType,newRate}=form;if(!category||!bedType||!newRate)return;
+        upd(dd=>{dd.rooms.filter(r=>r.category===category&&r.bedType===bedType).forEach(r=>r.baseRate=parseInt(newRate));});
+        flash('Rate updated');setState({sheet:null,form:{}});
+      },{background:T.gold,border:'none',borderRadius:8,color:'#111',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  if(sheet==='addUser'){
+    ['name','username','password','role'].forEach(k=>{
+      inner.appendChild(fieldRow(k.charAt(0).toUpperCase()+k.slice(1)+(k!=='role'?' *':''),form[k],v=>setState({form:{...form,[k]:v}}),k==='password'?'password':'text'));
+    });
+    inner.appendChild(div({marginBottom:14},[
+      lbl('Grant Permissions'),
+      div({display:'flex',flexWrap:'wrap',gap:8,marginTop:4},ALL_PERMS.map(p=>{
+        const active=(form.permissions||[]).includes(p);
+        const b=btn(p,()=>setState({form:{...form,permissions:active?(form.permissions||[]).filter(x=>x!==p):[...(form.permissions||[]),p]}}),{padding:'5px 11px',background:active?T.accent+'33':T.surface,border:`1px solid ${active?T.accent:T.border}`,borderRadius:20,color:active?T.accent:T.muted,cursor:'pointer',fontSize:11,fontWeight:600,textTransform:'capitalize'});
+        return b;
+      })),
+      btn('Select All',()=>setState({form:{...form,permissions:ALL_PERMS}}),{background:T.border,border:'none',borderRadius:8,color:T.sub,fontSize:10,marginTop:8,width:'100%',padding:'7px',cursor:'pointer'})
+    ]));
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('Cancel',()=>setState({sheet:null,form:{}}),{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('Create User',()=>{
+        const{username,password,name,role,permissions}=form;
+        if(!username||!password||!name)return flash('Fill all fields',true);
+        if(d.users.find(u=>u.username===username))return flash('Username exists',true);
+        upd(dd=>{dd.users.push({id:'U-'+Date.now(),username,password,name,role:role||'Staff',isAdmin:false,permissions:Array.isArray(permissions)?permissions:[],active:true,createdBy:STATE.user.username});});
+        flash('User created: '+username);setState({sheet:null,form:{}});
+      },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  overlay.appendChild(inner);
+  return overlay;
+}
+
+// ── Room Modal ────────────────────────────────
+function renderRoomModal(){
+  const r=STATE.roomModal;if(!r)return null;
+  const d=STATE.data;
+  const hasPerm=p=>STATE.user?.isAdmin||STATE.user?.permissions?.includes(p);
+  const sc=SC[r.status]||T.muted;
+  const bk=d.bookings.find(b=>b.id===r.bkId||(b.room===r.id&&(b.status==='checked-in'||b.status==='confirmed')));
+  const g=bk?d.guests.find(x=>x.id===r.guestId):null;
+  const bill=bk&&(r.status==='occupied'||r.status==='reserved')?calcBill(bk,d.kitchenOrders,d.settings?.taxRate||16):null;
+  const rk=bk?(d.kitchenOrders||[]).filter(k=>k.bkId===bk.id&&k.postedToBill):[];
+  const rate=r.customRate||r.baseRate;
+  const {ciOpts}=STATE;
+
+  const overlay=div({position:'fixed',inset:0,background:'rgba(0,0,0,.87)',zIndex:600,display:'flex',alignItems:'center',justifyContent:'center',padding:12});
+  overlay.addEventListener('click',()=>setState({roomModal:null}));
+  const modal=div({background:T.card,border:`2px solid ${sc}44`,borderRadius:20,width:'100%',maxWidth:400,maxHeight:'94vh',overflowY:'auto'});
+  modal.addEventListener('click',e=>e.stopPropagation());
+
+  // Header
+  const hd=div({background:sc+'18',padding:'18px 20px 14px',borderRadius:'18px 18px 0 0',borderBottom:`1px solid ${sc}33`},[
+    div({display:'flex',justifyContent:'space-between',alignItems:'flex-start'},[
+      div({},[h('div',{style:{fontSize:26,fontWeight:900}},['Room '+r.id]),h('div',{style:{fontSize:12,color:T.sub,marginTop:2}},[r.category+' · '+r.bedType+' · Floor '+r.floor])]),
+      div({display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6},[badge(r.status),btn('×',()=>setState({roomModal:null}),{background:'none',border:'none',color:T.muted,fontSize:20,cursor:'pointer'})])
+    ]),
+    div({marginTop:12,display:'flex',gap:10},[
+      div({flex:1,background:T.card,borderRadius:8,padding:'8px 10px',textAlign:'center'},[h('div',{style:{fontSize:9,color:T.muted,textTransform:'uppercase',marginBottom:3}},['Base Rate']),h('div',{style:{fontSize:15,fontWeight:800,color:T.gold}},[fmt(rate)+'/n'])]),
+      div({flex:1,background:T.card,borderRadius:8,padding:'8px 10px',textAlign:'center'},[h('div',{style:{fontSize:9,color:T.muted,textTransform:'uppercase',marginBottom:3}},['With GST 16%']),h('div',{style:{fontSize:15,fontWeight:800,color:T.accent}},[fmt(Math.round(rate*1.16))+'/n'])])
+    ])
+  ]);
+  modal.appendChild(hd);
+
+  const body=div({padding:'16px 20px 24px'});
+
+  if(r.status==='occupied'&&bk&&g){
+    // Guest info
+    body.appendChild(div({...styles.surface,marginBottom:12},[
+      slbl('Guest'),
+      div({display:'flex',alignItems:'center',gap:10,marginBottom:10},[
+        div({width:38,height:38,borderRadius:'50%',background:g.vip?T.gold+'22':T.accent+'22',border:`2px solid ${g.vip?T.gold:T.accent}44`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:900,color:g.vip?T.gold:T.accent,flexShrink:0},[g.name.split(' ').map(n=>n[0]).join('')]),
+        div({},[h('div',{style:{fontSize:14,fontWeight:800,marginBottom:1}},[g.name+(g.vip?' ⭐':'')]),h('div',{style:{fontSize:11,color:T.sub}},[g.phone||'—']),g.company&&h('div',{style:{fontSize:11,color:T.accent}},[g.company])])
+      ]),
+      div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:5,fontSize:11},
+        [['Check-In',bk.checkIn],['Check-Out',bk.checkOut],['Nights',String(bk.nights)],['ID',g.idNo||'—']].map(([k,v])=>h('div',{},[h('span',{style:{color:T.muted}},[k+': ']),h('span',{style:{fontWeight:600}},[v])]))
+      )
+    ]));
+    // Bill
+    if(bill)body.appendChild(div({...styles.surface,marginBottom:12},[
+      slbl('Room Account'),
+      div({fontSize:11},[
+        ...[['Room Charges',bk.nights+'n × '+fmt(bill.rate),bill.roomCharge],...(bk.extraCharges||[]).map(x=>[x.desc,'',x.amount]),...(bill.kitchen>0?[['Room Service','',bill.kitchen]]:[])].map(([k,sub,v])=>
+          div({display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px solid ${T.border}`},[h('span',{style:{color:T.sub}},[k]),h('span',{style:{fontWeight:600}},[fmt(v)])])
+        ),
+        div({display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px solid ${T.border}`},[h('span',{style:{color:T.sub}},['Subtotal']),h('span',{style:{fontWeight:700}},[fmt(bill.subtotal)])]),
+        div({display:'flex',justifyContent:'space-between',padding:'5px 0',borderBottom:`1px solid ${T.border}`},[h('span',{style:{color:T.sub}},['GST '+d.settings?.taxRate+'%']),h('span',{style:{color:T.muted}},[fmt(Math.round(bill.tax))])]),
+        div({display:'flex',justifyContent:'space-between',padding:'7px 0'},[h('span',{style:{fontWeight:800,fontSize:13}},['Grand Total']),h('span',{style:{fontWeight:900,fontSize:16,color:T.gold}},[fmt(bill.grand)])]),
+        h('div',{style:{fontSize:10,color:bk.paid?T.green:T.red,fontWeight:700}},[bk.paid?'✓ PAID':'⚠ PENDING'])
+      ])
+    ]));
+    // Kitchen
+    if(rk.length>0)body.appendChild(div({...styles.surface,marginBottom:12},[
+      slbl('Kitchen Orders on Bill'),
+      ...rk.map(k=>div({padding:'6px 0',borderBottom:`1px solid ${T.border}`},[
+        div({display:'flex',justifyContent:'space-between',marginBottom:2},[h('span',{style:{fontSize:11,fontWeight:700}},[k.id+' · '+k.time]),h('span',{style:{fontSize:12,fontWeight:800,color:T.gold}},[fmt(k.total)])]),
+        h('div',{style:{fontSize:10,color:T.sub}},[k.items.map(i=>i.qty+'×'+i.name).join(', ')])
+      ]))
+    ]));
+    // Print options
+    const printSec=div({marginBottom:12},[
+      h('div',{style:{fontSize:10,color:T.muted,marginBottom:8,textTransform:'uppercase',letterSpacing:'0.1em',fontWeight:700}},['🖨 Print Documents']),
+      div({...styles.surface,marginBottom:8,padding:10},[
+        h('div',{style:{fontSize:10,color:T.sub,marginBottom:7,fontWeight:700}},['Check-In Card Options']),
+        div({display:'flex',gap:8,marginBottom:7},[
+          btn('Taxable GST',()=>setState({ciOpts:{...STATE.ciOpts,taxable:true}}),{flex:1,padding:'6px',background:ciOpts.taxable?T.accent+'33':T.surface,border:`1px solid ${ciOpts.taxable?T.accent:T.border}`,borderRadius:7,color:ciOpts.taxable?T.accent:T.muted,fontSize:11,fontWeight:700,cursor:'pointer'}),
+          btn('Non-Taxable',()=>setState({ciOpts:{...STATE.ciOpts,taxable:false}}),{flex:1,padding:'6px',background:!ciOpts.taxable?T.purple+'33':T.surface,border:`1px solid ${!ciOpts.taxable?T.purple:T.border}`,borderRadius:7,color:!ciOpts.taxable?T.purple:T.muted,fontSize:11,fontWeight:700,cursor:'pointer'})
+        ]),
+        btn(ciOpts.breakfast?'☕ Breakfast: ON':'☕ Breakfast: OFF',()=>setState({ciOpts:{...STATE.ciOpts,breakfast:!STATE.ciOpts.breakfast}}),{width:'100%',padding:'6px',background:ciOpts.breakfast?T.green+'33':T.surface,border:`1px solid ${ciOpts.breakfast?T.green:T.border}`,borderRadius:7,color:ciOpts.breakfast?T.green:T.muted,fontSize:11,fontWeight:700,cursor:'pointer',marginBottom:8}),
+        btn('📋 Print Check-In Card',()=>showPrint(printCard(bk,g,d.settings?.hotelName,ciOpts)),{background:T.accent,border:'none',borderRadius:8,color:'#fff',width:'100%',fontSize:12,padding:'9px',fontWeight:700,cursor:'pointer'})
+      ]),
+      div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:8},[
+        btn('📊 Summary',()=>showPrint(printBill(bk,g||{name:bk.guest,company:'',phone:''},d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName)),{background:T.purple+'22',border:`1px solid ${T.purple}44`,borderRadius:8,color:T.purple,fontSize:11,padding:'8px',fontWeight:700,cursor:'pointer'}),
+        btn('🧾 Bill+GST',()=>showPrint(printBill(bk,g||{name:bk.guest,company:'',idNo:''},d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName)),{background:T.gold+'22',border:`1px solid ${T.gold}44`,borderRadius:8,color:T.gold,fontSize:11,padding:'8px',fontWeight:700,cursor:'pointer'}),
+        btn('📄 No Tax',()=>showPrint(printBill(bk,g||{name:bk.guest,company:'',idNo:''},d.kitchenOrders,false,0,d.settings?.hotelName)),{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,fontSize:11,padding:'8px',fontWeight:700,cursor:'pointer',gridColumn:'span 2'})
+      ])
+    ]);
+    body.appendChild(printSec);
+    if(hasPerm('checkout'))body.appendChild(btn('✗ Check Out '+g.name.split(' ')[0],()=>doCheckout(bk.id),{background:T.red+'33',border:`1px solid ${T.red}44`,borderRadius:8,color:T.red,width:'100%',padding:'12px',fontSize:13,fontWeight:700,cursor:'pointer'}));
+  }
+  if(r.status==='reserved'&&bk){
+    body.appendChild(div({...styles.surface,marginBottom:12},[slbl('Reserved For'),h('div',{style:{fontSize:15,fontWeight:800,marginBottom:4}},[r.guest||'Guest']),h('div',{style:{fontSize:11,color:T.sub}},['Arrival: '+(r.checkIn||'')+'  ·  Departure: '+(r.checkOut||'')])]));
+    if(hasPerm('checkin'))body.appendChild(btn('✓ Check In',()=>doCheckin(bk.id),{background:T.green+'33',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,width:'100%',padding:'12px',fontSize:13,fontWeight:700,cursor:'pointer'}));
+  }
+  if(r.status==='available'){
+    body.appendChild(div({...styles.card,background:T.green+'11',border:`1px solid ${T.green}33`,marginBottom:14,textAlign:'center'},[h('div',{style:{fontSize:14,color:T.green,fontWeight:800}},['✓ Available'])]));
+    if(hasPerm('checkin'))body.appendChild(btn('⚡ Quick Check-In → Room '+r.id,()=>setState({quickRoom:r.id,roomModal:null,sheet:'quickCI'}),{background:T.accent,border:'none',borderRadius:8,color:'#fff',width:'100%',padding:'12px',fontSize:14,fontWeight:700,cursor:'pointer',marginBottom:10}));
+  }
+  if(r.status==='cleaning'||r.status==='maintenance'){
+    body.appendChild(div({background:sc+'11',border:`1px solid ${sc}33`,borderRadius:14,padding:16,marginBottom:14,textAlign:'center'},[h('div',{style:{fontSize:14,color:sc,fontWeight:800}},[r.status==='cleaning'?'🧹 Being Cleaned':'🔧 Under Maintenance'])]));
+    body.appendChild(btn('✓ '+(r.status==='cleaning'?'Mark Clean':'Clear Maintenance'),()=>doMarkClean(r.id),{background:T.green+'33',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,width:'100%',padding:'12px',fontWeight:700,cursor:'pointer'}));
+  }
+  body.appendChild(btn('Close',()=>setState({roomModal:null}),{background:T.border,border:'none',borderRadius:8,color:T.muted,width:'100%',marginTop:10,padding:'9px',fontWeight:700,cursor:'pointer'}));
+  modal.appendChild(body);
+  overlay.appendChild(modal);
+  return overlay;
+}
+
+// ── Quick Check-In ────────────────────────────
+function renderQuickCI(){
+  if(STATE.sheet!=='quickCI')return null;
+  const d=STATE.data;
+  let qStep=STATE.qStep||1;
+  let qSearch=STATE.qSearch||'';
+  let qGuest=STATE.qGuest||null;
+  let qRoom=STATE.quickRoom?String(STATE.quickRoom):'';
+  let qForm=STATE.qForm||{checkIn:today(),checkOut:'',source:'Direct',notes:'',customRate:''};
+
+  const overlay=div({position:'fixed',inset:0,background:'rgba(0,0,0,.85)',zIndex:600,display:'flex',alignItems:'flex-end'});
+  overlay.addEventListener('click',()=>setState({sheet:null,qStep:1,qSearch:'',qGuest:null,qForm:null}));
+  const inner=div({background:T.card,border:`1px solid ${T.border}`,borderRadius:'20px 20px 0 0',padding:'20px 18px 32px',width:'100%',maxWidth:560,maxHeight:'94vh',overflowY:'auto'});
+  inner.addEventListener('click',e=>e.stopPropagation());
+
+  inner.appendChild(div({display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4},[
+    h('div',{style:{fontSize:16,fontWeight:900}},['⚡ Quick Check-In']),
+    btn('×',()=>setState({sheet:null,qStep:1,qSearch:'',qGuest:null}),{background:'none',border:'none',color:T.muted,fontSize:22,cursor:'pointer'})
+  ]));
+  inner.appendChild(div({display:'flex',gap:6,marginBottom:18,marginTop:10},[
+    div({flex:1,padding:'6px',borderRadius:8,textAlign:'center',background:qStep===1?T.accent+'22':T.surface,border:`1px solid ${qStep===1?T.accent:T.border}`,fontSize:11,color:qStep===1?T.accent:T.muted,fontWeight:700},['1. Search Guest']),
+    div({flex:1,padding:'6px',borderRadius:8,textAlign:'center',background:qStep===2?T.accent+'22':T.surface,border:`1px solid ${qStep===2?T.accent:T.border}`,fontSize:11,color:qStep===2?T.accent:T.muted,fontWeight:700},['2. Booking Details'])
+  ]));
+
+  if(qStep===1){
+    const searchWrap=div({position:'relative',marginBottom:14},[h('span',{style:{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:T.muted}},['🔍'])]);
+    const si=inp(qSearch,v=>{STATE.qSearch=v;render();},{placeholder:'Name, phone, CNIC, company…'});
+    si.style.paddingLeft='36px';si.style.fontSize='14px';
+    searchWrap.appendChild(si);
+    inner.appendChild(searchWrap);
+
+    const filtered=qSearch.length>0?d.guests.filter(g=>
+      g.name.toLowerCase().includes(qSearch.toLowerCase())||g.phone.includes(qSearch)||(g.idNo&&g.idNo.includes(qSearch))||(g.company&&g.company.toLowerCase().includes(qSearch.toLowerCase()))
+    ):[];
+
+    if(qSearch.length===0)inner.appendChild(h('div',{style:{fontSize:11,color:T.muted,textAlign:'center',marginBottom:10}},['Type to search guest portfolio ↑']));
+    if(qSearch.length>0&&filtered.length===0){
+      inner.appendChild(h('div',{style:{fontSize:13,color:T.sub,marginBottom:10,textAlign:'center'}},['No guest found for "'+qSearch+'"']));
+      inner.appendChild(btn('+ Register "'+qSearch+'" as New Guest',()=>{STATE.qGuest={id:'__new__',name:qSearch,phone:'',idNo:'',nationality:'',company:''};STATE.qStep=2;render();},{background:T.accent,border:'none',borderRadius:8,color:'#fff',width:'100%',padding:'9px',fontWeight:700,cursor:'pointer'}));
+    }
+    filtered.forEach(g=>{
+      const c=div({...styles.card,marginBottom:8,cursor:'pointer',display:'flex',gap:10,alignItems:'center'},[
+        div({width:38,height:38,borderRadius:'50%',background:g.vip?T.gold+'22':T.accent+'22',border:`2px solid ${g.vip?T.gold:T.accent}44`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:900,color:g.vip?T.gold:T.accent,flexShrink:0},[g.name.split(' ').map(n=>n[0]).join('')]),
+        div({flex:1},[h('div',{style:{fontSize:13,fontWeight:800,marginBottom:1}},[g.name+(g.vip?' ⭐':'')]),g.company&&tag2(g.company,T.accent),h('div',{style:{fontSize:11,color:T.sub}},[g.phone]),h('div',{style:{fontSize:10,color:T.muted}},[g.stays+' stays'+(g.customRate?' · Rate: '+fmt(g.customRate)+'/n':'')])]),
+        h('span',{style:{color:T.accent,fontSize:18}},['›'])
+      ]);
+      c.addEventListener('click',()=>{STATE.qGuest=g;if(g.customRate)STATE.qForm={...STATE.qForm,customRate:String(g.customRate)};STATE.qStep=2;render();});
+      inner.appendChild(c);
+    });
+  }
+
+  if(qStep===2&&qGuest){
+    inner.appendChild(div({...styles.surface,marginBottom:12,display:'flex',gap:10,alignItems:'center',background:T.accent+'11',border:`1px solid ${T.accent}33`},[
+      div({width:34,height:34,borderRadius:'50%',background:T.accent+'22',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:900,color:T.accent,flexShrink:0},[qGuest.name.split(' ').map(n=>n[0]).join('')]),
+      div({flex:1},[h('div',{style:{fontSize:13,fontWeight:800}},[qGuest.name]),h('div',{style:{fontSize:11,color:T.sub}},[qGuest.id==='__new__'?'New Guest':'From portfolio'])]),
+      btn('Change',()=>{STATE.qStep=1;render();},{background:'none',border:'none',color:T.accent,fontSize:11,cursor:'pointer',fontWeight:700})
+    ]));
+
+    if(qGuest.id==='__new__'){
+      const nf=div({...styles.surface,marginBottom:12});
+      nf.appendChild(slbl('New Guest Details'));
+      ['name','phone','idNo','nationality','company'].forEach(k=>{
+        const labels={name:'Full Name',phone:'Phone',idNo:'CNIC/Passport',nationality:'Nationality',company:'Company (optional)'};
+        const lEl=lbl(labels[k]);
+        const iEl=inp(qGuest[k]||'',v=>{STATE.qGuest={...STATE.qGuest,[k]:v};render();});
+        nf.appendChild(div({marginBottom:10},[lEl,iEl]));
+      });
+      inner.appendChild(nf);
+    }
+
+    const avail=d.rooms.filter(r=>r.status==='available');
+    inner.appendChild(div({marginBottom:12},[lbl('Room *'),sel(qRoom,v=>{STATE.quickRoom=parseInt(v)||null;render();STATE.quickRoom=parseInt(v)||null;},[['','Select available room'],...avail.map(r=>[String(r.id),'Room '+r.id+' — '+r.category+' '+r.bedType+' ('+fmt(r.customRate||r.baseRate)+'/n)'])])]));
+
+    const grid=div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12});
+    const ci=inp(qForm.checkIn,v=>{STATE.qForm={...STATE.qForm,checkIn:v};render();},{type:'date'});
+    const co=inp(qForm.checkOut,v=>{STATE.qForm={...STATE.qForm,checkOut:v};render();},{type:'date'});
+    grid.appendChild(div({},[lbl('Check-In *'),ci]));
+    grid.appendChild(div({},[lbl('Check-Out *'),co]));
+    inner.appendChild(grid);
+
+    inner.appendChild(div({marginBottom:12},[lbl('Custom Rate (blank = standard)'),inp(qForm.customRate,v=>{STATE.qForm={...STATE.qForm,customRate:v};render();},{type:'number',placeholder:'Standard rate if blank'})]));
+    inner.appendChild(div({marginBottom:12},[lbl('Source'),sel(qForm.source||'Direct',v=>{STATE.qForm={...STATE.qForm,source:v};render();},['Direct','OTA','Corporate','Walk-in','Phone'].map(s=>[s,s]))]));
+    inner.appendChild(div({marginBottom:12},[lbl('Notes'),inp(qForm.notes||'',v=>{STATE.qForm={...STATE.qForm,notes:v};render();})]));
+
+    const sr=d.rooms.find(r=>r.id===parseInt(qRoom));
+    if(sr&&qForm.checkOut){
+      const nights=Math.max(1,Math.round((new Date(qForm.checkOut)-new Date(qForm.checkIn))/86400000));
+      const rate=qForm.customRate?parseInt(qForm.customRate):(sr.customRate||sr.baseRate);
+      inner.appendChild(div({...styles.surface,marginBottom:14},[
+        div({display:'flex',justifyContent:'space-between',marginBottom:4},[h('span',{style:{fontSize:11,color:T.muted}},['Room × '+nights+'n']),h('span',{style:{fontWeight:700,color:T.gold}},[fmt(rate*nights)])]),
+        div({display:'flex',justifyContent:'space-between'},[h('span',{style:{fontSize:11,color:T.muted}},['With 16% GST']),h('span',{style:{fontWeight:700,color:T.accent}},[fmt(Math.round(rate*nights*1.16))])])
+      ]));
+    }
+
+    inner.appendChild(div({display:'flex',gap:10},[
+      btn('← Back',()=>{STATE.qStep=1;render();},{background:T.border,border:'none',borderRadius:8,color:T.muted,flex:1,padding:'9px',fontWeight:700,cursor:'pointer'}),
+      btn('✓ Confirm Check-In',()=>{
+        if(!qRoom||!qForm.checkOut)return flash('Select room and dates',true);
+        doQuickCheckin({guest:qGuest,room:parseInt(qRoom),form:qForm});
+        STATE.qStep=1;STATE.qSearch='';STATE.qGuest=null;STATE.qForm=null;
+      },{background:!qRoom||!qForm.checkOut?T.border:T.green,border:'none',borderRadius:8,color:!qRoom||!qForm.checkOut?T.muted:'#fff',flex:2,padding:'12px',fontSize:13,fontWeight:700,cursor:'pointer'})
+    ]));
+  }
+
+  overlay.appendChild(inner);
+  return overlay;
+}
+
+// ── Print preview ─────────────────────────────
+function renderPrintModal(){
+  const doc=STATE.printDoc;if(!doc)return null;
+  const overlay=div({position:'fixed',inset:0,background:'#000d',zIndex:800,display:'flex',flexDirection:'column'});
+  const bar=div({background:'#111',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 16px',flexShrink:0},[
+    h('span',{style:{color:'#fff',fontWeight:700,fontSize:14}},['🖨 Print Preview']),
+    div({display:'flex',gap:10},[
+      btn('🖨 Print / Save PDF',null,{background:'#4f8ef7',border:'none',borderRadius:8,color:'#fff',padding:'8px 20px',fontWeight:700,fontSize:14,cursor:'pointer'}),
+      btn('✕ Close',()=>setState({printDoc:null}),{background:'#333',border:'none',borderRadius:8,color:'#aaa',padding:'8px 16px',fontWeight:700,cursor:'pointer'})
+    ])
+  ]);
+  const iframe=h('iframe',{srcdoc:doc,style:{flex:1,border:'none',background:'#fff'},title:'print'});
+  bar.querySelector('button').addEventListener('click',()=>{iframe.contentWindow.focus();iframe.contentWindow.print();});
+  overlay.appendChild(bar);overlay.appendChild(iframe);
+  return overlay;
+}
+
+// ── Login ─────────────────────────────────────
+function renderLogin(){
+  const d=STATE.data;
+  let u='',p='',err='';
+  const el=div({minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20},[
+    div({...styles.card,width:'100%',maxWidth:360,padding:32},[
+      div({textAlign:'center',marginBottom:28},[
+        div({width:56,height:56,borderRadius:14,background:T.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,fontWeight:900,color:'#fff',margin:'0 auto 12px'},['P']),
+        h('div',{style:{fontSize:22,fontWeight:900}},['PCH BWP']),
+        h('div',{style:{fontSize:11,color:T.muted,textTransform:'uppercase',letterSpacing:'0.1em',marginTop:2}},['Hotel PMS · Cloud'])
+      ])
+    ])
+  ]);
+  const card=el.querySelector('[style*="max-width"]');
+  const uf=div({marginBottom:12},[lbl('Username')]);const ui=inp('',v=>{u=v;});uf.appendChild(ui);card.appendChild(uf);
+  const pf=div({marginBottom:20},[lbl('Password')]);const pi=inp('',v=>{p=v;},{type:'password'});pf.appendChild(pi);card.appendChild(pf);
+  const errEl=h('div',{style:{fontSize:11,color:T.red,marginBottom:12,textAlign:'center',display:'none'}});card.appendChild(errEl);
+  const go=()=>{
+    const usr=d.users.find(x=>x.username===u.trim()&&x.password===p&&x.active);
+    if(usr){setState({user:usr,tab:'dashboard'});}
+    else{const ex=d.users.find(x=>x.username===u.trim());errEl.textContent=!ex?'Username not found':!ex.active?'User is disabled':'Wrong password';errEl.style.display='block';}
+  };
+  ui.addEventListener('keydown',e=>e.key==='Enter'&&go());
+  pi.addEventListener('keydown',e=>e.key==='Enter'&&go());
+  const lb=btn('Login',go,{background:T.accent,border:'none',borderRadius:8,color:'#fff',width:'100%',padding:'12px',fontSize:14,fontWeight:700,cursor:'pointer'});
+  card.appendChild(lb);
+  card.appendChild(h('div',{style:{fontSize:10,color:T.muted,textAlign:'center',marginTop:14}},['Admin: bobby / admin123']));
+  card.appendChild(h('div',{style:{fontSize:10,color:T.sub,textAlign:'center',marginTop:4}},[d.users.length+' user'+(d.users.length!==1?'s':'')+' registered']));
+  return el;
+}
+
+// ── TABS CONFIG ───────────────────────────────
+const TABS=[
+  {id:'dashboard',icon:'⊞',label:'Home',perm:'dashboard',render:renderDashboard},
+  {id:'rooms',icon:'🏨',label:'Rooms',perm:'rooms',render:renderRooms},
+  {id:'bookings',icon:'📋',label:'Bookings',perm:'bookings',render:renderBookings},
+  {id:'guests',icon:'👤',label:'Guests',perm:'guests',render:renderGuests},
+  {id:'kitchen',icon:'🍽',label:'Kitchen',perm:'kitchen',render:renderKitchen},
+  {id:'employees',icon:'👥',label:'Staff',perm:'employees',render:renderEmployees},
+  {id:'accounts',icon:'💰',label:'Accounts',perm:'accounts',render:renderAccounts},
+  {id:'reports',icon:'📊',label:'Reports',perm:'reports',render:renderReports},
+  {id:'users',icon:'🔑',label:'Users',perm:'users',render:renderUsers},
+  {id:'settings',icon:'⚙️',label:'Settings',perm:'settings',render:renderSettings},
+];
+
+// ── Main render ────────────────────────────────
+function render(){
+  const root=document.getElementById('app');
+  root.innerHTML='';
+
+  if(STATE.loading){root.appendChild(div({minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center'},[h('div',{style:{color:T.muted,fontSize:14}},['Loading...'])]));return;}
+  if(!STATE.user){root.appendChild(renderLogin());return;}
+
+  const hasPerm=p=>STATE.user?.isAdmin||STATE.user?.permissions?.includes(p);
+  const vtabs=TABS.filter(t=>hasPerm(t.perm));
+
+  // Wrapper
+  const wrap=div({fontFamily:'system-ui,sans-serif',background:T.bg,minHeight:'100vh',color:T.text,paddingBottom:60});
+
+  // Toast
+  if(STATE.toast){const t=h('div',{className:'toast',style:{background:STATE.toast.err?'#5c1a1a':'#0d3320',color:STATE.toast.err?'#fca5a5':'#6ee7b7'}},[STATE.toast.err?'⚠ '+STATE.toast.msg:'✓ '+STATE.toast.msg]);wrap.appendChild(t);}
+
+  // Header
+  const hdr2=div({background:T.surface,borderBottom:`1px solid ${T.border}`,padding:'11px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:200},[
+    div({display:'flex',alignItems:'center',gap:10},[
+      div({width:32,height:32,borderRadius:8,background:T.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:900,color:'#fff'},['P']),
+      div({},[h('div',{style:{fontWeight:900,fontSize:14}},['PCH BWP']),h('div',{style:{fontSize:9,color:T.muted,letterSpacing:'0.16em',textTransform:'uppercase'}},['Hotel PMS'])])
+    ]),
+    div({display:'flex',alignItems:'center',gap:8},[
+      h('span',{style:{fontSize:10,color:T.muted}},[STATE.user.name]),
+      STATE.user.isAdmin&&tag2('ADMIN',T.gold),
+      btn('Out',()=>setState({user:null,tab:'dashboard'}),{background:T.border,border:'none',borderRadius:8,color:T.muted,padding:'5px 10px',fontSize:11,cursor:'pointer'})
+    ])
+  ]);
+  wrap.appendChild(hdr2);
+
+  // Tab bar
+  const tabBar=div({background:T.surface,borderBottom:`1px solid ${T.border}`,overflowX:'auto',display:'flex',scrollbarWidth:'none'});
+  vtabs.forEach(t=>{
+    const tb=h('button',{className:'tab-btn'+(t.id===STATE.tab?' active':'')},[h('span',{style:{fontSize:15}},[t.icon]),t.label]);
+    tb.addEventListener('click',()=>setState({tab:t.id,detail:null}));
+    tabBar.appendChild(tb);
+  });
+  wrap.appendChild(tabBar);
+
+  // Content
+  const activeTab=vtabs.find(t=>t.id===STATE.tab)||vtabs[0];
+  if(activeTab)wrap.appendChild(activeTab.render());
+
+  // Modals
+  const rm=renderRoomModal();if(rm)wrap.appendChild(rm);
+  const qci=renderQuickCI();if(qci)wrap.appendChild(qci);
+  const sh=renderSheet();if(sh)wrap.appendChild(sh);
+  const pm=renderPrintModal();if(pm)wrap.appendChild(pm);
+
+  root.appendChild(wrap);
+}
+
+// ── Boot ──────────────────────────────────────
+(async()=>{
+  render(); // show loading
+  await initFirebase();
+  let data=await fbLoad();
+  if(!data){data=makeData();}
+  else{
+    if(!data.users)data.users=makeData().users;
+    else if(!data.users.find(u=>u.username==='bobby'))data.users.unshift(makeData().users[0]);
+  }
+  STATE.data=data;
+  STATE.loading=false;
+  render();
+})();
+</script>
+</body>
+</html>
