@@ -488,12 +488,12 @@ function renderBookings(){
           b.status==='confirmed'&&hasPerm('checkin')&&btn('✓ Check In',()=>doCheckin(b.id),{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
           b.status==='confirmed'&&btn('📋 Card',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:'',nationality:'',idType:'',idNo:''};showPrint(printCard(b,g,d.settings?.hotelName,STATE.globalCiOpts));},{background:T.border,border:'none',borderRadius:8,color:T.sub,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
           b.status==='checked-in'&&hasPerm('checkout')&&btn('✗ Check Out',()=>doCheckout(b.id),{background:T.red+'22',border:`1px solid ${T.red}44`,borderRadius:8,color:T.red,padding:'7px 12px',fontSize:11,fontWeight:700,cursor:'pointer'}),
-          (b.status==='checked-in'||b.status==='checked-out')&&...[
+          ...(b.status==='checked-in'||b.status==='checked-out'?[
             btn('📋 Card',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:'',nationality:'',idType:'',idNo:''};showPrint(printCard(b,g,d.settings?.hotelName,STATE.globalCiOpts));},{background:T.border,border:'none',borderRadius:8,color:T.sub,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
             btn('📊 Sum',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',phone:''};showPrint(printBill(b,g,d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName));},{background:T.purple+'22',border:`1px solid ${T.purple}44`,borderRadius:8,color:T.purple,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
             btn('🧾 +GST',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',idNo:''};showPrint(printBill(b,g,d.kitchenOrders,true,d.settings?.taxRate||16,d.settings?.hotelName));},{background:T.gold+'22',border:`1px solid ${T.gold}44`,borderRadius:8,color:T.gold,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
-            btn('📄 No Tax',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',idNo:''};showPrint(printBill(b,g,d.kitchenOrders,false,0,d.settings?.hotelName));},{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'}),
-          ]
+            btn('📄 No Tax',()=>{const g=d.guests.find(x=>x.id===b.guestId)||{name:b.guest,company:'',idNo:''};showPrint(printBill(b,g,d.kitchenOrders,false,0,d.settings?.hotelName));},{background:T.green+'22',border:`1px solid ${T.green}44`,borderRadius:8,color:T.green,padding:'7px 10px',fontSize:11,fontWeight:700,cursor:'pointer'})
+          ]:[])
         ])
       ]);
     })
@@ -827,7 +827,7 @@ function renderSheet(){
         const{desc,type,amount,category}=form;
         if(!desc||!type||!amount)return flash('Fill all fields',true);
         upd(dd=>{dd.accounts.transactions.push({id:'TX-'+Date.now(),date:today(),desc,type,amount:parseFloat(amount),category:category||'Other',ref:''});});
-        flash('Transaction?. recorded');setState({sheet:null,form:{}});
+        flash('Transaction recorded');setState({sheet:null,form:{}});
       },{background:T.accent,border:'none',borderRadius:8,color:'#fff',flex:1,padding:'9px',fontWeight:700,cursor:'pointer'})
     ]));
   }
@@ -1069,7 +1069,7 @@ function renderQuickCI(){
     }
 
     const avail=d.rooms.filter(r=>r.status==='available');
-    inner.appendChild(div({marginBottom:12},[lbl('Room *'),sel(qRoom,v=>{STATE.quickRoom=parseInt(v)||null;render();STATE.quickRoom=parseInt(v)||null;},[['','Select available room'],...avail.map(r=>[String(r.id),'Room '+r.id+' — '+r.category+' '+r.bedType+' ('+fmt(r.customRate||r.baseRate)+'/n)'])])]));
+    inner.appendChild(div({marginBottom:12},[lbl('Room *'),sel(qRoom,v=>{STATE.quickRoom=parseInt(v)||null;render();},[['','Select available room'],...avail.map(r=>[String(r.id),'Room '+r.id+' — '+r.category+' '+r.bedType+' ('+fmt(r.customRate||r.baseRate)+'/n)'])])]));
 
     const grid=div({display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12});
     const ci=inp(qForm.checkIn,v=>{STATE.qForm={...STATE.qForm,checkIn:v};render();},{type:'date'});
@@ -1113,44 +1113,82 @@ function renderPrintModal(){
   const bar=div({background:'#111',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'10px 16px',flexShrink:0},[
     h('span',{style:{color:'#fff',fontWeight:700,fontSize:14}},['🖨 Print Preview']),
     div({display:'flex',gap:10},[
-      btn('🖨 Print / Save PDF',null,{background:'#4f8ef7',border:'none',borderRadius:8,color:'#fff',padding:'8px 20px',fontWeight:700,fontSize:14,cursor:'pointer'}),
+      btn('🖨 Print',null,{background:'#4f8ef7',border:'none',borderRadius:8,color:'#fff',padding:'8px 20px',fontWeight:700,fontSize:14,cursor:'pointer'}),
       btn('✕ Close',()=>setState({printDoc:null}),{background:'#333',border:'none',borderRadius:8,color:'#aaa',padding:'8px 16px',fontWeight:700,cursor:'pointer'})
     ])
   ]);
-  const iframe=h('iframe',{srcdoc:doc,style:{flex:1,border:'none',background:'#fff'},title:'print'});
-  bar.querySelector('button').addEventListener('click',()=>{iframe.contentWindow.focus();iframe.contentWindow.print();});
+  const iframe=h('iframe',{style:{flex:1,border:'none',background:'#fff'},title:'print'});
   overlay.appendChild(bar);overlay.appendChild(iframe);
+  
+  // Use timeout to ensure iframe is in DOM before writing
+  setTimeout(()=>{
+    try {
+      const d = iframe.contentWindow.document;
+      d.open(); d.write(doc); d.close();
+    } catch(e) {
+      console.error('Iframe write failed', e);
+      // Fallback for strict file:// security
+      iframe.srcdoc = doc;
+    }
+  }, 10);
+
+  const printBtn = bar.querySelector('button');
+  if(printBtn) printBtn.addEventListener('click',()=>{
+    try {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } catch(e) {
+      alert('Printing blocked by browser security (common on file:// origins). Try running through a local server or use Cmd+P.');
+    }
+  });
+  
   return overlay;
 }
+
+// Global Error Handler
+window.onerror = function(msg, url, lineNo, columnNo, error) {
+  const errDiv = document.createElement('div');
+  errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#fde8e8;color:#9b1c1c;padding:12px;z-index:10000;font-family:monospace;font-size:12px;border-bottom:2px solid #f8b4b4';
+  errDiv.innerHTML = '<strong>Runtime Error:</strong> ' + msg + ' <br><small>Line: ' + lineNo + '</small>';
+  document.body.appendChild(errDiv);
+  console.error(error);
+  return false;
+};
 
 // ── Login ─────────────────────────────────────
 function renderLogin(){
   const d=STATE.data;
-  let u='',p='',err='';
-  const el=div({minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20},[
-    div({...styles.card,width:'100%',maxWidth:360,padding:32},[
-      div({textAlign:'center',marginBottom:28},[
-        div({width:56,height:56,borderRadius:14,background:T.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,fontWeight:900,color:'#fff',margin:'0 auto 12px'},['P']),
-        h('div',{style:{fontSize:22,fontWeight:900}},['PCH BWP']),
-        h('div',{style:{fontSize:11,color:T.muted,textTransform:'uppercase',letterSpacing:'0.1em',marginTop:2}},['Hotel PMS · Cloud'])
-      ])
+  if(!d) return div({minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center'},[h('div',{style:{color:T.muted,fontSize:14}},['Loading data...'])]);
+  
+  let u='',p='';
+  const card = div({...styles.card,width:'100%',maxWidth:360,padding:32},[
+    div({textAlign:'center',marginBottom:28},[
+      div({width:56,height:56,borderRadius:14,background:T.accent,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,fontWeight:900,color:'#fff',margin:'0 auto 12px'},['P']),
+      h('div',{style:{fontSize:22,fontWeight:900}},['PCH BWP']),
+      h('div',{style:{fontSize:11,color:T.muted,textTransform:'uppercase',letterSpacing:'0.1em',marginTop:2}},['Hotel PMS · Cloud'])
     ])
   ]);
-  const card=el.querySelector('[style*="max-width"]');
+
+  const el=div({minHeight:'100vh',background:T.bg,display:'flex',alignItems:'center',justifyContent:'center',padding:20},[card]);
+  
   const uf=div({marginBottom:12},[lbl('Username')]);const ui=inp('',v=>{u=v;});uf.appendChild(ui);card.appendChild(uf);
   const pf=div({marginBottom:20},[lbl('Password')]);const pi=inp('',v=>{p=v;},{type:'password'});pf.appendChild(pi);card.appendChild(pf);
   const errEl=h('div',{style:{fontSize:11,color:T.red,marginBottom:12,textAlign:'center',display:'none'}});card.appendChild(errEl);
+  
   const go=()=>{
     const usr=d.users.find(x=>x.username===u.trim()&&x.password===p&&x.active);
     if(usr){setState({user:usr,tab:'dashboard'});}
     else{const ex=d.users.find(x=>x.username===u.trim());errEl.textContent=!ex?'Username not found':!ex.active?'User is disabled':'Wrong password';errEl.style.display='block';}
   };
+  
   ui.addEventListener('keydown',e=>e.key==='Enter'&&go());
   pi.addEventListener('keydown',e=>e.key==='Enter'&&go());
+  
   const lb=btn('Login',go,{background:T.accent,border:'none',borderRadius:8,color:'#fff',width:'100%',padding:'12px',fontSize:14,fontWeight:700,cursor:'pointer'});
   card.appendChild(lb);
   card.appendChild(h('div',{style:{fontSize:10,color:T.muted,textAlign:'center',marginTop:14}},['Admin: bobby / admin123']));
   card.appendChild(h('div',{style:{fontSize:10,color:T.sub,textAlign:'center',marginTop:4}},[d.users.length+' user'+(d.users.length!==1?'s':'')+' registered']));
+  
   return el;
 }
 
@@ -1225,12 +1263,23 @@ function render(){
 (async()=>{
   render(); // show loading
   await initFirebase();
-  let data=await fbLoad();
-  if(!data){data=makeData();}
-  else{
-    if(!data.users)data.users=makeData().users;
-    else if(!data.users.find(u=>u.username==='bobby'))data.users.unshift(makeData().users[0]);
+  let loaded=await fbLoad();
+  const defaults=makeData();
+  let data=loaded||defaults;
+  
+  if(loaded){
+    // Ensure all top-level keys exist
+    Object.keys(defaults).forEach(k=>{
+      if(!data[k]) data[k]=defaults[k];
+    });
+    // Defensive check for nested objects
+    if(!data.accounts.transactions) data.accounts.transactions = [];
+    if(!data.settings) data.settings = defaults.settings;
+    if(!data.rooms || !data.rooms.length) data.rooms = defaults.rooms;
+    // Ensure bobby admin exists
+    if(!data.users.find(u=>u.username==='bobby')) data.users.unshift(defaults.users[0]);
   }
+  
   STATE.data=data;
   STATE.loading=false;
   render();
